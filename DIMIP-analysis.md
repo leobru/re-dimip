@@ -148,9 +148,7 @@ that drives the parser — the prime target for the next pass.
 
 Not exercised by the trace; identified statically and to be confirmed later:
 
-- **Directive parser/dispatcher** — driven by the keyword table (`~02176`) and handler
-  table (`~02237`); routes the `КТ`, `К`, `$`-prefixed, and macro directives (manual
-  §6.2.3+) to handlers in the `03xxx`–`05xxx` region.
+- **Directive dispatcher — decoded** (see §8a below).
 - **Archive / catalog** — per the manual, DIMIP keeps its archive in disk zones with a
   catalog (идпол/пароль/file map) in the first zone, accessed via `Э70`. Whether the
   OS-level **`Э63`/`КЛЮЧАР`** area/budget access-control calls (extracodes.txt §5.3.156+)
@@ -163,11 +161,66 @@ Not exercised by the trace; identified statically and to be confirmed later:
   use multiply-by-constant + `счмр` (`D02415/D02417/D02420/D02421`) to extract/insert
   bit-fields of catalog/zone-address words.
 
+## 8a. The directive dispatcher (decoded)
+
+Parsing/dispatch is done by **`РАЗБОР` (03207)**: it copies the parsed command line into a
+work buffer (`'1345'`…), packs the directive name into token `'1347'`, and runs the scan
+loop **`G03222`**. Each table entry is loaded, right-shifted by 24 (`СДА 64+24`) to expose
+its key, and XOR-compared with `'1347'`; on a match, **`G03236`** pulls the handler address
+out of the entry's low 15 bits into `М13`, inspects the flag bits, and jumps to the handler.
+
+**Dispatch table — `ТАБДИР` (02274–02325, 26 entries).** Each 48-bit entry is:
+
+```
+ bits 48..25 (24)        bits 24..16             bits 15..1
+ ┌────────────────────┬──────────────────┬───────────────────┐
+ │ key: 3 GOST chars  │ flag bits        │ handler address   │
+ │ (directive name)   │ (pre-handler     │ (jumped to via    │
+ │                    │  actions)        │  М13)             │
+ └────────────────────┴──────────────────┴───────────────────┘
+```
+
+Decoded keys → handlers (regenerate with `./decode_dispatch.py`; named in `dimip.sym`):
+
+| Key | Handler | Key | Handler | Key | Handler |
+|-----|---------|-----|---------|-----|---------|
+| `КТ`  | `ДИРКТ`  05232 | `ПЕЧ` | `ДИРПЕЧ` 04703 | `Л` | `ДИРЛ` 05603 |
+| `К`   | `ДИРК`   05520 | `ИНФ` | `ДИРИНФ` 05026 | `В` | `ДИРВ` 05717 |
+| `ПЕР` | `ДИРПЕР` 05014 | `ЗАМ` | `ДИРЗАМ` 05222 | `Н` | `ДИРН` 05600 |
+| `ПОЛ` | `ДИРПОЛ` 05317 | `РЕД` | `ДИРРЕД` 05644 | `И` | `ДИРИ` 03063 |
+| `ВЫЙ` | `ДИРВЫЙ` 03523 | `ВЫБ` | `ДИРВЫБ` 05173 | `З` | `ДИРЗ` 05667 |
+| `ВОЙ` | `ДИРВОЙ` 05176 | `СФ`  | `ДИРСФ`  05361 | `С` | `ДИРС` 03341 |
+| `ПП`  | `ДИРПП`  05157 | `ЗП`  | `ДИРЗП`  05142 | `П` | `ДИРП` 03364 |
+| `А`   | `ДИРА`   05134 | `О`   | `ДИРО`   03135 | `Б` | `ДИРБ` 05051 |
+| `Ф`   | `ДИРФ`   03404 | `Д`   | `ДИРД`   05727 |     |              |
+
+The **flag bits** (bits 16–24) gate pre-handler behavior in `G03236` (e.g. `ПЕР/ПЕЧ/Ф`=140,
+`И/З`=120, `Л/В`=100, `ПОЛ`=400); their exact meanings are only partially decoded.
+
+The scan walks an **`М7`-indexed window** of the table whose start depends on the monitor
+state, i.e. which directives are valid in the current mode:
+
+- **`КТ?` / general mode:** `М7` starts at `-18`, so the scan covers `02303`–`02324`
+  (`К, КТ, ИНФ, ЗАМ, РЕД, ПЕЧ, …`). The single-letter entries below `02303` are not visible.
+- **Editor mode** (entered by `РЕД`): `М7` starts at `-25`, so the scan now begins at
+  `02274` — exactly where the **single-letter editor commands** `Л В Н И З С П` live, which
+  is why they only work after a file is opened. Code at `05732`–`05740` reads/writes
+  `ТАБДИР`, consistent with this mode switching.
+
+**Validated dynamically** (`cat input.txt | dispak -t -t dimip.b6`):
+
+- `КТ 2053 1 TEST KEY` → scan `G03222` matches at `02317` (compare shows `acc=025062` =
+  `КТ` GOST-packed = that entry's `hi24`) and reaches **`ДИРКТ` (05232)**.
+- `РЕД 2048 *0000` → **`ДИРРЕД` (05644)**; then the editor command `Л` → **`ДИРЛ` (05603)**,
+  with the scan now starting at `02274` (`М7=-25`). End-to-end confirmation of both the entry
+  format and the mode-dependent window.
+
 ## 9. Open questions / next-pass targets
 
-1. **Decode the dispatcher** (`~02176` keywords + `~02237` handler table) and follow each
-   directive handler — needs an input-driven trace (drive `dimip.b6` through `dispak` with
-   actual directives) to confirm targets.
+1. **Dispatcher decoded (§8a).** Remaining: trace each individual directive handler; fully
+   decode the per-entry **flag bits**; identify the adjacent table at `02256`–`02273` (same
+   layout but its low-15 fields are not code addresses) and the keyword block at
+   `02176`–`02226`.
 2. **Resolve the `КЛЮЧАР`/`Э63` question**: does DIMIP use OS area/budget access control,
    or implement its archive purely over `Э70`?
 3. **Name the low-core working variables** (`'1346'`, `'1350'`, `'1715'`, `'1774'`, …) once
