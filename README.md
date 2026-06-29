@@ -14,9 +14,8 @@ the [re-dispak](https://github.com/leobru/re-dispak) methodology.
 |------|-------------|
 | `dimip.bin` | Monitor image: 2048 words, loaded at octal `02000` |
 | `dimip.b6` | DISPAK job deck that bootstraps the monitor |
-| `dimip.lst` | Annotated disassembly (BEMSH autocode) |
 | `dimip.sym` | Symbol table |
-| `disasm.sh` | Reproducible disassembly recipe |
+| `disasm.sh` | Reproducible disassembly recipe (generates `dimip.lst`) |
 | `trace` | Reference simulator execution trace (initialization path) |
 | [`DIMIP-analysis.md`](DIMIP-analysis.md) | First-pass structural analysis — start here |
 
