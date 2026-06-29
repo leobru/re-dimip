@@ -215,6 +215,56 @@ state, i.e. which directives are valid in the current mode:
   with the scan now starting at `02274` (`М7=-25`). End-to-end confirmation of both the entry
   format and the mode-dependent window.
 
+## 8b. In-memory file representation & the `Л` (Листинг) directive
+
+### File representation
+
+A file is a sequence of **numbered lines** (manual §6.2.1: *"Файл — набор строк символов"*).
+The full file lives in the **временная область** — zones on МД (≤ 64 tracts) — and a working
+window is paged into core via `Э70`. The memory map while editing:
+
+```
+00000–01777  resident OS + DIMIP working variables ('13xx','17xx' cells)
+02000–05777  DIMIP monitor (code + data, the "2 zones")
+06000 …      file editing window — up to 5 листов (the "5 листов ОЗУ"),
+             lines stored contiguously; rest of the file stays on МД (Э70-paged)
+```
+
+Lines are stored **contiguously and length-prefixed**, starting at **06000** (the base kept
+in `М1`, = `D05773+5`). Each line is:
+
+```
+ header word:  bits 48..25  auxiliary/flag field (low bits gate special handling in G05621)
+               bits 24..7   line NUMBER (18 bits)
+               bits  6..1   LENGTH L = total words in the line, incl. header
+ + (L-1) words of packed text (KOI-7 for a file opened with `РЕД … *…`)
+```
+
+Because the number is stored *in each line*, numbering can be non-monotonic and even
+duplicated (manual §6.2.4) — operations address lines by this stored number, not by position.
+
+The central accessor is **`ЧИТСТР` (03067)** (called from 9 sites): it reads the header at
+`М1`, masks the low 6 bits (`и D02426`=`&077`) to get L, copies the whole line into the
+current-line buffer at **'1746'**, then **advances `М1` by L** to the next line and bumps a
+line counter (`М11`). Walking the file is just repeated `ЧИТСТР`. The line number is unpacked
+for display by `G03031` (`asn 106; aax 2422` = `(header>>6) & 0777777` → cell `'1774'`).
+
+### The `Л` directive (manual §6.2.5)
+
+`[$]Л [<N1> [<N2> [<ОБРАЗ>]]]` — **Листинг**: print lines from the temp area to the terminal.
+No args = sequential listing; `N1` = just that line; `N1 N2` = the range; a 3rd `<ОБРАЗ>` =
+only lines in the range matching the pattern; the `$` prefix suppresses the printed numbers.
+
+Handler **`ДИРЛ` (05603)**: `пио G05616(М12)` splits the no-arg path (`М12=0`) from the
+arg-driven path. The argument count/values come from the parser (`'1347'` token, numeric
+args via `G04121/G03041`). The listing loop fetches each line with `ЧИТСТР`, converts the
+line number to decimal (`G03014`/`G03031`, dividing by the constants `D02416/D02417`), and
+writes number+text to the terminal via `Э71`.
+
+**Validated dynamically:** in the `РЕД 2048 *0000` / `Л` trace, `ЧИТСТР` reads the header
+`…0112` at 06000 → L=`012`=10 words, line number = 1 (→ `'1774'`), copies the 10 words to
+`'1746'…'1757'`, advances `М1`, and proceeds to format/emit the line.
+
 ## 9. Open questions / next-pass targets
 
 1. **Dispatcher decoded (§8a).** Remaining: trace each individual directive handler; fully
@@ -226,5 +276,8 @@ state, i.e. which directives are valid in the current mode:
 3. **Name the low-core working variables** (`'1346'`, `'1350'`, `'1715'`, `'1774'`, …) once
    their meaning is established.
 4. **Verify the text encoding** of the keyword table (`02176`–`02226`) and re-decode.
-5. Eventually: hand-edit `dimip.lst` into a `dimip.be` source and round-trip it through
+5. **Editor internals (§8b):** meaning of the line-header **auxiliary field** (bits 25–48);
+   the exact character packing per encoding (KOI-7 / GOST / ТЕКСТ); and the
+   временная-область **zone↔лист paging** that `РЕД` performs (the `Э70` window management).
+6. Eventually: hand-edit `dimip.lst` into a `dimip.be` source and round-trip it through
    `asm.pl` + `verify.pl` (re-dispak workflow) to a byte-exact rebuild.
