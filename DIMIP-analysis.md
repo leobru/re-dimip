@@ -1,0 +1,177 @@
+# DIMIP monitor — first-pass structural analysis
+
+*Reverse engineering of `dimip.bin`. Companion artifacts: `dimip.lst` (annotated
+disassembly), `dimip.sym` (symbol table), `disasm.sh` (reproducible recipe).*
+
+## 1. What DIMIP is
+
+**ДИМИП** — *Диалоговый Монитор Индивидуального Пользования* ("interactive monitor
+for individual use") — is an interactive, terminal-driven text editor / file monitor
+for the BESM-6 running under OS **ДИСПАК (DISPAK)**. (User manual:
+`besm6.github.io/wiki/DIMIP-manual.md`.) It lets a user edit text files on tape/disk
+(МЛ/МД), organises files into per-user **archives** (архив) addressed through a
+**catalog** (каталог) keyed by **идпол** (user id) + **ключ/пароль** (key/password),
+runs **subordinate tasks** (ПЗ) under monitor control, and provides a macro processor.
+The resident monitor occupies 2 zones on МЛ/МД and needs 5 pages of core.
+
+This matches the binary exactly: the data segment holds the prompt/error strings
+`КЛЮЧАР`, `ПАРОЛЬ`, `ИДПОЛ`, `БЮДЖ`, `ФАЙЛ`, `ЗОНА`, `БИБЛ`, `СТРОКИ ФАЙЛА`, `ДЛИ.ТФ`,
+`ЕКОНЕЦ`, `ЧУЖОЙ`, `КЛЮЧ`, and the code is built around terminal I/O (Э71), disk/tape
+exchange (Э70), an asynchronous event loop (Э53), and subordinate-task control.
+
+## 2. Provenance & how to reproduce
+
+| File | Role |
+|------|------|
+| `dimip.bin` | 12288 bytes = **2048 BESM-6 48-bit words** (octal 04000), load address **02000**. |
+| `dimip.b6`  | DISPAK job deck: loads at 6000, runs `Э70 6000`, transfers control to **02000** (`к 00 30 02000`). |
+| `trace`     | 947-line simulator execution trace of the deck (startup path only — see §6). |
+| `dimip.lst` | Annotated disassembly, produced by `disasm.sh`. |
+| `dimip.sym` | Seed symbol table (`<octal-addr> <type> <name>`; type B/C=code, D=data, G=GOST text, A=addr). |
+
+Regenerate the listing:
+
+```sh
+./disasm.sh > dimip.lst      # = disbesm6 -b -a2000 -e2000 <trace-entries> -n dimip.sym dimip.bin
+```
+
+`disbesm6` (`/home/leob/git/leobru/dispak-tools/disbesm6`) does flow analysis but cannot
+follow the computed jumps of the directive dispatcher, so `disasm.sh` additionally feeds
+**every address the trace executed** as an entry point (`-e`). With those, every
+trace-reached instruction decodes as code (verified: 0 trace addresses left as data).
+
+## 3. Memory layout
+
+```
+02000 ┌───────────────────────────── entry / initialization (СТАРТ, §4)
+      │  02000–02073  startup code
+      │  02074–02530  data: dispatch/keyword tables, message strings, constants
+      │  02502–...    interleaved code + data (directive handlers, helpers)
+      │  03141 ГЛЦИКЛ main monitor loop;  03331 ЖДИКОМ terminal read/wait
+      │  03xxx–04xxx  directive handlers, field pack/unpack helpers, macro engine
+      │  05xxx        more handlers
+05741 │  05741–05777  resident constants (masks, addresses; D057xx)
+05777 └─────────────────────────────
+```
+
+Code and data are interleaved (typical of hand-written BEMSH). Working variables live
+**below** 02000 in resident low core (rendered as literals `'1774'`, `'1350'`, … in the
+listing) — they are *not* part of `dimip.bin` and so are not yet named.
+
+## 4. Startup / initialization (`02000`–`02073`)
+
+Entered at **02000** after the deck's bootstrap. The sequence (left/right instruction
+pairs per word; see `dimip.lst`):
+
+| Addr | Action |
+|------|--------|
+| 02000–02001 | Build an Э70 info word (`D05773`+`D02074`); `Э70 70000` — initial disk exchange (load working zones). |
+| 02005 | `Э50 103` — set **abort-reaction program address**. |
+| 02006 | `Э50 102` — set **number of intercepted aborts**. |
+| 02007 | `Э63 3` — **reserve CPU time for abort processing** (info `D02505`). |
+| 02010 | `Э50 114` — request **date & machine number**. |
+| 02011–02016 | Build flag/mask words (`'1731'`, `'1732'`…) from constants `D02164/D02346/D02347/D02350/D02437`. |
+| 02017 | `Э53 21` — **declare/clear events** (init the event scale). |
+| 02020 | `Э53 11` — set **event-decoder (дешифратор) address**. |
+| 02021 | `Э53 12` — set **event-scale mask** (`D05771`). |
+| 02022–02024 | Loop: copy 19-word working table into low core (`'1764'`…). |
+| 02025 | `Э50 100` — request **job cipher (шифр)**. |
+| 02026 | `Э71 D02504` — first **terminal I/O**; `нед D05742` status check. |
+| 02030 | `пв G05216` — call setup subroutine. |
+| 02032–02035 | `Э70` disk exchanges (read monitor zones); `пв G03335`. |
+| 02040 | `Э67 D02400` — install **debug/abort handler**; info word `D02400 = A(ГЛЦИКЛ)` → after any abort, resume the main loop. |
+| 02041–02046 | Final table setup; calls `G02070`, `G03402`, `G02064`. |
+
+In short, init = **fault/abort handling** (Э50 102/103, Э63 3, Э67) + **system info**
+(Э50 100/114) + **asynchronous event mechanism** (Э53 21/11/12) + **load monitor zones**
+(Э70) + **open terminal** (Э71), then fall through into the monitor proper.
+
+## 5. Extracode (system-call) usage
+
+All confirmed against `extracodes.txt`. АИСП = executive address (subfunction selector).
+
+| Extracode | Used as | Meaning (extracodes.txt) | Role in DIMIP |
+|-----------|---------|--------------------------|---------------|
+| **Э50** | 100 | запрос шифра задачи | get job cipher |
+| | 102 | установка числа перехватываемых авостов | set intercepted-abort count |
+| | 103 | установка адреса программы реакции на авост | set abort handler addr |
+| | 114 | запрос даты и номера ЭВМ | get date / machine № |
+| | 131 | дозаказ набора данных | request extra dataset |
+| **Э53** | 11 | установка адреса дешифратора событий | install event decoder |
+| | 12 | установка маски шкалы событий | set event mask |
+| | 17 | закрытие задачи до наступления событий | **suspend until event** (idle wait) |
+| | 21 | объявление/гашение событий | declare/clear events |
+| **Э62** | 44 | отказ от выходного потока | release print output stream |
+| | 30000–67777 | сдвиг по НД / отказ от НД | position / release dataset |
+| **Э63** | 3 | резервирование времени на обработку авоста | reserve abort-handling time |
+| | (СМ=`КЛЮЧАР`) | создание/каталог/доступ к области, бюджет | archive/area access control (see §8) |
+| **Э66** | — | обращение к стандартным программам | call library subprograms |
+| **Э67** | D02400 | управление базовыми средствами отладки | install abort/break handler → ГЛЦИКЛ |
+| **Э70** | (info words) | обмен ОП ↔ внешняя память (МБ/НД/МЛ) | **disk/tape exchange**: archive zones, temp area, monitor zones |
+| **Э71** | (info words) | обмен с терминалом | **terminal I/O**: read directives, write prompts/messages |
+
+The combination **Э53 11/12/21 + Э53 17 + Э71** is the heart of the interactive monitor:
+install an event decoder and mask, then loop issuing terminal I/O and *suspending until an
+event* (terminal-ready / subordinate-task signal) rather than busy-waiting.
+
+## 6. Control flow — what the trace shows
+
+The reference `trace` exercises **only initialization**: the DISPAK resident
+extracode-070 path (`00010`→`03651`…), the deck bootstrap (`06001`), then DIMIP startup
+`02000`–`02073` and the subroutines it calls (`02070, 03041, 03323, 03331, 03335, 03507,
+05216`, ranges `03141–03251, 03474–03551, 03736–03776`). It ends as the monitor settles
+into its event-wait. **No interactive directive is driven**, so the directive handlers
+(§8) are reached only via the dispatcher and must be read statically.
+
+Two pivotal routines, both well-supported by evidence:
+
+- **`ГЛЦИКЛ` (03141)** — main monitor loop. It is the target installed as the Э67
+  abort/restart handler (`D02400 = A(ГЛЦИКЛ)`) and the most common jump/return target in
+  the code; it issues `Э62` dataset positioning and dispatches work.
+- **`ЖДИКОМ` (03331)** — terminal read / wait: `Э71` terminal exchange immediately
+  followed by `Э53 17` (suspend until event) = "issue prompt, await the user's directive".
+
+## 7. Data & message strings
+
+The prompt/error fragments are assembled from text constants around `02345`–`02366`,
+`02456`, `02506`–`02507` (named in `dimip.sym`): `КЛЮЧАР, СТРОКИ, ФАЙЛА, БИБЛ, ЗОН(А),
+ПАРОЛЬ, ИДПОЛ, БЮДЖ, ФАЙЛ, ДЛИ.ТФ, ЕКОНЕЦ, ЧУЖОЙ, КЛЮЧ`. These correspond directly to the
+catalog-setup directive `КТ <ТОМ> <ЗОНА> <ИДПОЛ> <КЛЮЧ>` and access errors in the manual.
+
+A keyword-like table sits at `02176`–`02226` (`SUВАR, INFВU, МULСV, …, IЕQУ=` — partially
+mangled by text-encoding guesses) and an address/parameter table at `02237`–`02325`
+(several entries auto-decode as `конк A(Gxxxx)`, e.g. `A(G02536)`, `A(G03135)`,
+`A(ГЛЦИКЛ)`). Together these look like the **directive keyword → handler dispatch table**
+that drives the parser — the prime target for the next pass.
+
+## 8. Directive dispatch & data structures (static, manual-guided)
+
+Not exercised by the trace; identified statically and to be confirmed later:
+
+- **Directive parser/dispatcher** — driven by the keyword table (`~02176`) and handler
+  table (`~02237`); routes the `КТ`, `К`, `$`-prefixed, and macro directives (manual
+  §6.2.3+) to handlers in the `03xxx`–`05xxx` region.
+- **Archive / catalog** — per the manual, DIMIP keeps its archive in disk zones with a
+  catalog (идпол/пароль/file map) in the first zone, accessed via `Э70`. Whether the
+  OS-level **`Э63`/`КЛЮЧАР`** area/budget access-control calls (extracodes.txt §5.3.156+)
+  are used for this, or only DIMIP's own format, is **open** — the `КЛЮЧАР` constant is
+  present but the trace shows only `Э63 3`.
+- **Temp area / output buffer** — the editing scratch zones (временная область) and the
+  subordinate-task output buffer (буфер вывода) named in the manual; their disk addresses
+  appear among the `D057xx` constants and the Э70 info words.
+- **Field pack/unpack helpers** — routines `G03041/G03050/G03052`, `G04102/G04112/G04121`
+  use multiply-by-constant + `счмр` (`D02415/D02417/D02420/D02421`) to extract/insert
+  bit-fields of catalog/zone-address words.
+
+## 9. Open questions / next-pass targets
+
+1. **Decode the dispatcher** (`~02176` keywords + `~02237` handler table) and follow each
+   directive handler — needs an input-driven trace (drive `dimip.b6` through `dispak` with
+   actual directives) to confirm targets.
+2. **Resolve the `КЛЮЧАР`/`Э63` question**: does DIMIP use OS area/budget access control,
+   or implement its archive purely over `Э70`?
+3. **Name the low-core working variables** (`'1346'`, `'1350'`, `'1715'`, `'1774'`, …) once
+   their meaning is established.
+4. **Verify the text encoding** of the keyword table (`02176`–`02226`) and re-decode.
+5. Eventually: hand-edit `dimip.lst` into a `dimip.be` source and round-trip it through
+   `asm.pl` + `verify.pl` (re-dispak workflow) to a byte-exact rebuild.
