@@ -293,7 +293,7 @@ The catalog zone holds: control words (0–5), a free/occupied **tract bitmap** 
 ```
  word 1:  file NAME — 6 GOST characters, right-justified (e.g. ТРАК, ПАМЯТЬ, ДИМИП)
  word 2:  metadata (besmtool's four 12-bit groups, high→low):
-            bits 46-45  encoding:  0 = У (ГОСТ) · 1 = К (КОИ-7) · 2 = I (ISO)
+            bits 46-45  type:  0 = У (ГОСТ text) · 1 = К (binary) · 2 = I (ISO text)
             bits 36-25  0100       constant ("entry present")
             bits 24-13  length × 8 (number of tracts = field >> 3)
             bits 12-1   start zone, RELATIVE to the archive base
@@ -313,8 +313,39 @@ the live `СФ` output:
 | `КЗ2`    | `…2a2702` | `2000 0100 0060 0005` | I | 6 | 005 | 01646 |
 | `КЗ5`    | `…2a2705` | `0000 0100 0120 0016` | У | 012 | 016 | 01657 |
 
-(`ВОЙ <идпол>` = log into a library; `СФ` = show that library's files. The `Y/I/К` column is
-each file's stored text encoding, matching `РЕД … *…` opening files as КОИ-7.)
+(The `У/I/К` column is each file's stored **type**: `У` = ГОСТ text, `I` = ISO text,
+`К` = **binary**. Login and the `$` prefix are covered in §8d.)
+
+## 8d. Login path and the `$` prefix
+
+### Login: `КТ` → `ВОЙ`
+
+- **`КТ <том> .<зона>`** (`ДИРКТ`, 05232) sets the catalog location (volume + zone) and reads
+  the catalog zone; the monitor then prompts **`ВОЙДИ`** ("log in").
+- **`ВОЙ <идпол>`** (`ДИРВОЙ`, 05176) logs into a library: it takes the идпол name (parser
+  tokens `'1351'`/`'1352'`), looks it up among the catalog's идпол records and makes it the
+  current library, reads that library's file directory into core (via `G05216`), and prints
+  the banner **`*ДИМИП-МКП 05.04.85*`** (inline text at `D05212`, emitted by the `G02064`
+  inline-argument printer). Control then returns to general mode (`СФ`, `РЕД`, …).
+
+### The `$` prefix
+
+`$` is the input character code **`0127`**, recognized only as the **first** character of a
+directive line. It is consumed during input tokenization and sets a **prefix flag**; the
+directive-name token (`'1347'`) is built from the remainder and is *identical* to the
+unprefixed form — verified dynamically: both `СФ` and `$СФ` pack to `030464`. Each handler
+then consults the flag and alters its behavior (manual §6.2.4–6.2.5):
+
+| directive | plain | with `$` |
+|-----------|-------|----------|
+| `СФ` | show the catalog | `$СФ <ИМЯФ>` — **delete** file `<ИМЯФ>` |
+| `Л`  | list lines **with** numbers | `$Л` — list **without** numbers |
+| `ВЫЙ`| leave | `$ВЫЙ` — leave **and print the session protocol** to the printer |
+| `А`  | toggle protocol mode | `$А` — discard the accumulated protocol |
+
+`ДИРВЫЙ` (03523) shows the mechanism concretely: on the protocol-dump path it issues
+`Э62 44` (release the output/print stream). So `$` does not change *which* handler runs — it
+changes *what that handler does*, sometimes drastically (e.g. `СФ` show → `$СФ` delete).
 
 ## 9. Open questions / next-pass targets
 
