@@ -331,10 +331,14 @@ the live `СФ` output:
 ### The `$` prefix
 
 `$` is the input character code **`0127`**, recognized only as the **first** character of a
-directive line. It is consumed during input tokenization and sets a **prefix flag**; the
-directive-name token (`'1347'`) is built from the remainder and is *identical* to the
-unprefixed form — verified dynamically: both `СФ` and `$СФ` pack to `030464`. Each handler
-then consults the flag and alters its behavior (manual §6.2.4–6.2.5):
+directive line. The line lexer marks token boundaries with a high bit per word (mask
+`МСКМАР`=`D02445`); routine **`МЕТКИ`** (03540) scans those markers, and `03157`–`03160` then
+sets the **prefix flag cell `'1707'`** to `ФЛАГД` (`D02434` = `0100000000`) when the leading
+char is `$`. The `$` is skipped, so the directive-name token (`'1347'`) is built from the
+remainder and is *identical* to the unprefixed form — verified dynamically: both `СФ` and
+`$СФ` pack to `030464`. Each handler then reads `'1707'` and alters its behavior
+(manual §6.2.4–6.2.5) — e.g. `ДИРСФ` ORs `'1707'` with the file-name argument at `05366` to
+take the delete (`$СФ <ИМЯФ>`) vs. show (`СФ`) path:
 
 | directive | plain | with `$` |
 |-----------|-------|----------|
