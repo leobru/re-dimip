@@ -265,14 +265,67 @@ writes number+text to the terminal via `Э71`.
 `…0112` at 06000 → L=`012`=10 words, line number = 1 (→ `'1774'`), copies the 10 words to
 `'1746'…'1757'`, advances `М1`, and proceeds to format/emit the line.
 
+## 8c. The catalog / archive on-disk format & the `СФ` directive
+
+A user logs in and lists the catalog like this (terminate with `ВЫЙ`; the `≠` continuation
+prompt pages long output, so feed blank lines to continue):
+
+```
+КТ 2148 .1640     set catalog: volume 2148, catalog in zone 01640 → prompt "ВОЙДИ"
+ВОЙ ПРОГОН        log into library (идпол) ПРОГОН → banner "*ДИМИП-МКП 05.04.85*"
+СФ                show the file catalog
+ВЫЙ               leave
+```
+
+### `СФ` handler (`ДИРСФ`, 05361)
+
+`Э70 D02412` reads the catalog zone into core; the column header is copied from the template
+at `СФАЙЛ` (02363: `ФАЙЛ ЗОНА ДЛИ.ТФ .БИБЛ.`) and emitted; then the file-directory entries are
+walked (formatter at `G05452`, runs once per file), each formatted as
+`name · zone · length · encoding · идпол` and written to the terminal via `Э71`.
+
+### On-disk catalog (zone 01640 on volume 2148; dump with `besmtool dump 2148 --start=01640 --length=1`)
+
+The catalog zone holds: control words (0–5), a free/occupied **tract bitmap** (≈6–17), the
+**идпол records** (e.g. word 35–36 = signature `*ДИМИП` + library name `ПРОГОН`), and the
+**file directory** — an array of **2-word entries**:
+
+```
+ word 1:  file NAME — 6 GOST characters, right-justified (e.g. ТРАК, ПАМЯТЬ, ДИМИП)
+ word 2:  metadata (besmtool's four 12-bit groups, high→low):
+            bits 46-45  encoding:  0 = У (ГОСТ) · 1 = К (КОИ-7) · 2 = I (ISO)
+            bits 36-25  0100       constant ("entry present")
+            bits 24-13  length × 8 (number of tracts = field >> 3)
+            bits 12-1   start zone, RELATIVE to the archive base
+```
+
+The displayed absolute zone = **archive_base + relative_zone**, where the archive base is the
+catalog zone + 1 (here 01641). Storing zones relatively is exactly what the manual promises:
+*"в каталоге записываются относительные положения файлов … старый архив может быть переписан
+на другой том"* (the archive is volume-relocatable). Worked examples, all confirmed against
+the live `СФ` output:
+
+| File | name word | metadata | enc | length | rel | abs zone |
+|------|-----------|----------|-----|--------|-----|----------|
+| `ТРАК`   | `…3230202a` | `0000 0100 0010 0055` | У | 1 | 055 | 01716 |
+| `ПАМЯТЬ` | `2f202c3e323b` | `2000 0100 0030 0041` | I | 3 | 041 | 01702 |
+| `ДИМИП`  | `…2428 2c282f` | `1000 0100 0020 0001` | К | 2 | 001 | 01642 |
+| `КЗ2`    | `…2a2702` | `2000 0100 0060 0005` | I | 6 | 005 | 01646 |
+| `КЗ5`    | `…2a2705` | `0000 0100 0120 0016` | У | 012 | 016 | 01657 |
+
+(`ВОЙ <идпол>` = log into a library; `СФ` = show that library's files. The `Y/I/К` column is
+each file's stored text encoding, matching `РЕД … *…` opening files as КОИ-7.)
+
 ## 9. Open questions / next-pass targets
 
 1. **Dispatcher decoded (§8a).** Remaining: trace each individual directive handler; fully
    decode the per-entry **flag bits**; identify the adjacent table at `02256`–`02273` (same
    layout but its low-15 fields are not code addresses) and the keyword block at
    `02176`–`02226`.
-2. **Resolve the `КЛЮЧАР`/`Э63` question**: does DIMIP use OS area/budget access control,
-   or implement its archive purely over `Э70`?
+2. **Archive (§8c):** DIMIP keeps its own catalog/file-directory format on disk and reads it
+   with `Э70` (confirmed via `КТ`/`ВОЙ`/`СФ`). Remaining: the catalog **control words** (0–5),
+   the **tract bitmap** (≈6–17), and the full **идпол record** layout (passwords, directory
+   pointers); and whether the OS `КЛЮЧАР`/`Э63` access control is used at all.
 3. **Name the low-core working variables** (`'1346'`, `'1350'`, `'1715'`, `'1774'`, …) once
    their meaning is established.
 4. **Verify the text encoding** of the keyword table (`02176`–`02226`) and re-decode.
