@@ -336,9 +336,20 @@ directive line. The line lexer marks token boundaries with a high bit per word (
 sets the **prefix flag cell `'1707'`** to `ФЛАГД` (`D02434` = `0100000000`) when the leading
 char is `$`. The `$` is skipped, so the directive-name token (`'1347'`) is built from the
 remainder and is *identical* to the unprefixed form — verified dynamically: both `СФ` and
-`$СФ` pack to `030464`. Each handler then reads `'1707'` and alters its behavior
-(manual §6.2.4–6.2.5) — e.g. `ДИРСФ` ORs `'1707'` with the file-name argument at `05366` to
-take the delete (`$СФ <ИМЯФ>`) vs. show (`СФ`) path:
+`$СФ` pack to `030464`.
+
+The same parse step latches the indicator into **register `М3`** as well as the flag cell:
+at `03153`–`03154` the first line char is XOR-compared with the `$` code (`нтж D02076`) and the
+result is loaded into `М3` (`уи М3`), so **`М3 == 0` ⟺ the line began with `$`** — that is the
+very test (`пино G03161(М3)` at `03157`) that decides whether `'1707'` gets `ФЛАГД`. `М3`
+survives dispatch into the handler. So a handler can consult the prefix in **either** form:
+- via the **flag cell `'1707'`** — e.g. `ДИРСФ` ORs `'1707'` with the file-name argument at
+  `05366` to take delete (`$СФ <ИМЯФ>`) vs. show (`СФ`);
+- via **`М3`** — e.g. `ДИРПОЛ` has no `'1707'` test at all; at `ПОИСКП` (`05322`) it does
+  `пио ИСКЛП(М3)`, so `$ПОЛ` (`М3=0`) branches to `ИСКЛП` (`05340`), which clears the идпол
+  record and frees its library's zones in the catalog map, vs. the plain search/insert path.
+
+Behavior table:
 
 | directive | plain | with `$` |
 |-----------|-------|----------|
