@@ -16,6 +16,7 @@ set -e
 DIS=${DISBESM6:-/home/leob/git/leobru/dispak-tools/disbesm6}
 TRACE=${TRACE:-trace}
 SYM=${SYM:-dimip.sym}
+NOTES=${NOTES:-dimip.notes}
 
 # Entry points confirmed by пв/vjm calls in the trace
 CALLS="-e2070 -e3041 -e3323 -e3335 -e3507 -e5216"
@@ -24,4 +25,9 @@ CALLS="-e2070 -e3041 -e3323 -e3335 -e3507 -e5216"
 TRACE_ENTRIES=$(grep -oE '^[0-9]{5}:' "$TRACE" | tr -d ':' | sort -u | \
     awk '{n=strtonum("0"$1); if (n>=01000 && n<=05777) printf "-e%s ", $1}')
 
-exec "$DIS" -b -a2000 -e2000 $CALLS $TRACE_ENTRIES -n "$SYM" dimip.bin
+# Disassemble; pipe through annotate.py when an annotation file is present.
+if [ -f "$NOTES" ]; then
+    "$DIS" -b -a2000 -e2000 $CALLS $TRACE_ENTRIES -n "$SYM" dimip.bin | ./annotate.py "$NOTES"
+else
+    exec "$DIS" -b -a2000 -e2000 $CALLS $TRACE_ENTRIES -n "$SYM" dimip.bin
+fi
