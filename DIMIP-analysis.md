@@ -351,16 +351,91 @@ take the delete (`$СФ <ИМЯФ>`) vs. show (`СФ`) path:
 `Э62 44` (release the output/print stream). So `$` does not change *which* handler runs — it
 changes *what that handler does*, sometimes drastically (e.g. `СФ` show → `$СФ` delete).
 
+## 8e. Catalog creation — administrator path (`$КТ` / `ПОЛ` / `ВОЙ`), traced
+
+Driven on scratch volume **1234** with the input
+`$КТ 1234 0000 0100` / `ПОЛ ПРИМЕР` / `ВОЙ ПРИМЕР` / `ВЫЙ`
+(`cat input | dispak -t -t dimip.b6`). The dialogue confirms the whole flow:
+
+```
+УС.КТ                 <- startup prompt (set catalog)      ;  reply: $КТ 1234 0000 0100
+ВОЙДИ                 <- catalog created, log in           ;  reply: ПОЛ ПРИМЕР
+ВОЙДИ                 <- user added, log in                ;  reply: ВОЙ ПРИМЕР
+*ДИМИП-МКП 05.04.85*  <- login banner (ПРИМЕР accepted)    ;  reply: ВЫЙ  -> clean exit
+```
+
+### How a user volume becomes addressable — `Э50 131` (attach volume to LUN)
+DIMIP does **not** reach the user's volume through a deck `ЛЕН` line. It attaches it at
+run time: the dispak handler `Э50 131` (extra.c `case 0131`, *"attach volume to handle"*)
+takes the LUN in `acc.l>>18` and the **BCD** volume number in `acc.r`. Routine
+**`ПОДКАТ`** (`G03656`/`G03660`) builds that word from `АРГ1` (the typed `<ТОМ>`):
+
+```
+Э50 131 , acc = 6777 0000 0001 1064   ->  LUN = 067 ,  vol = NDISK(0o11064)=1234
+```
+
+Note `0o11064 == 0x1234` — the four typed digits as BCD nibbles. So `<ТОМ>=1234`
+attaches **volume 1234 to LUN 67** (the catalog working LUN). The `..77..` middle field is
+the mandatory `077` marker `Э50 131` checks.
+
+### `$КТ <ТОМ> <НЗОНА> <ДАРХ>` — create catalog (`ДИРКТ`, 05232)
+1. `ОТКНД` (05216): `Э62 60777` — release any catalog LUN held from a previous `КТ`.
+2. parse `АРГ1..3` = `<ТОМ>=1234`, `<НЗОНА>=0`, `<ДАРХ>=0100` (archive length, **64** zones, octal).
+3. `ПОДКАТ` (`G03656`): `Э50 131` attaches volume 1234 to LUN 67; builds the zone-I/O
+   descriptor in cell `'1556'`.
+4. **read** catalog zone: `Э70 '1556'` = *read* LUN 67 zone 0 → memory page `06000`
+   (control word `0010030001670000`).
+5. build the empty catalog image in `06000`: `<ДАРХ>` at word `0002`, the free-tract
+   **bitmap** at words `0005`–`0006` (all-free), zero everything else.
+6. `ЗАПКАТ` (`G05334`) — write the catalog back **twice**:
+   * `Э70 РАБ` (`'1774'`) = *write* LUN 67 zone 0 ← `06000`  → the real catalog on **volume 1234**;
+   * `Э70 ИНФЗ` (`'2413'`) = *write* LUN 40 zone 0 ← `06000`  → a working copy in the deck's
+     **scratch area** (`ЛЕН 40(2с)`, `С`=scratch, not persisted — which is why only
+     volume 1234 changes on disk).
+7. `ГЛЦИКЛ` prints `ВОЙДИ`.
+
+Э70 control-word format (per dispak `ddio()`): the executive address points at a word read
+as two half-instructions — left `op&010`=read-zone / else write, `addr&03700<<4`=memory page;
+right `op&077`=LUN, `addr&07777`=zone. Decoder: `e70.py` (e.g. `./e70.py 0000030001670000`).
+
+### `[$]ПОЛ <ИДПОЛ> ...` — register a user/library (`ДИРПОЛ`, 05317)
+Same skeleton: `ПОДКАТ`→`Э50 131` (re-attach 1234 to LUN 67) → `Э70` read zone 0 → scan the
+идпол list (`'6116'`-stride entries) for `АРГ1` (`ПРИМЕР`), insert it → fall into `ЗАПКАТ`
+(write volume + scratch) → `ВОЙДИ`. The result on **volume 1234 zone 0** (verified with
+`besmtool dump 1234 --start=00000 --length=1`):
+
+| word | octal | meaning |
+|------|-------|---------|
+| `0002` | `…0100` | `<ДАРХ>` archive length = 64 zones |
+| `0005` | `3777777777777777` | free-tract bitmap (all free) |
+| `0006` | `7777740000000000` | bitmap (cont.) |
+| `0035` | GOST `*ДИМИП` | catalog signature |
+| `0036` | GOST `ПРИМЕР` | the registered library/идпол name |
+
+(`*` = GOST `031`; `ПРИМЕР` = `057 060 050 054 045 060`.) With no `<КЛЮЧ>`/`<ПАДМ>` given,
+no password is stored, so the later `ВОЙ` needs none.
+
+### `ВОЙ ПРИМЕР` — log in (`ДИРВОЙ`, 05176)
+No `Э50 131` and **no `Э70`** in this directive: it works off the in-core catalog left in
+`06000` by the preceding `ПОЛ`, finds `ПРИМЕР`, and prints the banner via `ПЕЧСО`
+(`G05211→02064`). Success = the `*ДИМИП-МКП 05.04.85*` line.
+
+New symbols from this trace: `ПОДКАТ` (`03656`, attach catalog volume + build I/O descriptor),
+`ЗАПКАТ` (`05334`, write catalog back to volume + scratch copy).
+
 ## 9. Open questions / next-pass targets
 
 1. **Dispatcher decoded (§8a).** Remaining: trace each individual directive handler; fully
    decode the per-entry **flag bits**; identify the adjacent table at `02256`–`02273` (same
    layout but its low-15 fields are not code addresses) and the keyword block at
    `02176`–`02226`.
-2. **Archive (§8c):** DIMIP keeps its own catalog/file-directory format on disk and reads it
-   with `Э70` (confirmed via `КТ`/`ВОЙ`/`СФ`). Remaining: the catalog **control words** (0–5),
-   the **tract bitmap** (≈6–17), and the full **идпол record** layout (passwords, directory
-   pointers); and whether the OS `КЛЮЧАР`/`Э63` access control is used at all.
+2. **Archive (§8c, §8e):** catalog *creation* now traced (`$КТ`/`ПОЛ` build zone 0 in `06000`
+   and write it via `ЗАПКАТ`; volume attached with `Э50 131`). Confirmed fields: `<ДАРХ>` at
+   word `0002`, free-tract **bitmap** at `0005`–`0006`, `*ДИМИП` signature + идпол name at
+   `0035`/`0036`. Remaining: the rest of the catalog **control words** (0–5), the exact
+   **bitmap** encoding (tract↔bit), the full **идпол record** layout (passwords `<КЛЮЧ>`/`<ПАДМ>`,
+   directory pointers — exercise `ПОЛ <ИДПОЛ> <КЛЮЧ> <ПАДМ>` with full params), and whether the
+   OS `КЛЮЧАР`/`Э63` access control is used at all.
 3. **Name the low-core working variables** (`'1346'`, `'1350'`, `'1715'`, `'1774'`, …) once
    their meaning is established.
 4. **Verify the text encoding** of the keyword table (`02176`–`02226`) and re-decode.
