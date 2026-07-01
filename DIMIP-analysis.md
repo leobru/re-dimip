@@ -434,6 +434,28 @@ No `Э50 131` and **no `Э70`** in this directive: it works off the in-core cata
 New symbols from this trace: `ПОДКАТ` (`03656`, attach catalog volume + build I/O descriptor),
 `ЗАПКАТ` (`05334`, write catalog back to volume + scratch copy).
 
+## 8f. The `/*` suffix on `РЕД`, traced
+
+Compared `РЕД` ⏎ ⏎ `ВЫЙ` against `РЕД/*` ⏎ ⏎ `ВЫЙ`
+(`cat in | dispak -t -t dimip.b6`). Manual §6.2.4: `РЕД/*` reads the **80-byte format
+(МС Дубна)** — a different on-volume text encoding — and enters editor mode, with a
+diagnostic → general mode if the volume's encoding doesn't match.
+
+What the trace shows:
+- **Lexing.** `/` is a token separator and `*` (code `031`) is a modifier. The directive
+  token `КОМАНД` is unchanged (still `РЕД`), so both dispatch to the same handler `ДИРРЕД`
+  (`05644`). The `*` is carried in the arg area — the raw line cell `'1322'` becomes
+  `РЕД *` (vs `РЕД` ), and `АРГ3+26` (`'1404'`) = `031`. (Same pattern as the `$` prefix,
+  but as a trailing modifier rather than a flag cell.)
+- **Behaviour (no `<ИМЯФ>`).** With no filename the file is *new*, so nothing is read from a
+  volume. The `ДИРРЕД`-onward instruction stream is **byte-identical** between the two runs,
+  extracode usage is **identical**, and the terminal output is identical — i.e. `/*` is inert
+  here. The `*` format flag is parsed and stored but never consumed, because the encoding
+  choice only matters on the file-**read** path (`РЕД/* <ИМЯФ>` / `РЕД/* <ТОМ> * <ЗОНА>`).
+
+So `/*` changes *how an existing file's bytes are decoded on read* (80-byte МС-Дубна format),
+not the new-file/line-input path exercised here.
+
 ## 9. Open questions / next-pass targets
 
 1. **Dispatcher decoded (§8a).** Remaining: trace each individual directive handler; fully
