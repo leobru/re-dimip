@@ -18,17 +18,6 @@
 
 import sys, re
 
-# disbesm6 renders a symbol+offset where the cell is BELOW the symbol as an
-# unsigned 32-bit value (e.g. КОМАНД+4294967295 == КОМАНД-1). Convert any such
-# "+N" with N >= 2**31 back to a small negative "-(2**32 - N)". Small genuine
-# offsets (сда 64+24, D05773+5, ПРЕФ+9, ...) are far below 2**31 and untouched.
-_WRAP = 1 << 32
-def fix_offsets(s):
-    def repl(m):
-        n = int(m.group(1))
-        return '-' + str(_WRAP - n) if n >= (1 << 31) else m.group(0)
-    return re.sub(r'\+(\d+)', repl, s)
-
 def main():
     if len(sys.argv) < 2:
         sys.stderr.write("usage: annotate.py <annotation-file> < listing\n")
@@ -58,7 +47,7 @@ def main():
     expect_right = False
     w = sys.stdout.write
     for raw in sys.stdin:
-        line = fix_offsets(raw.rstrip('\n'))
+        line = raw.rstrip('\n')
         m = addr_re.match(line)
         if m:
             addr = int(m.group(1), 8)
