@@ -456,6 +456,84 @@ What the trace shows:
 So `/*` changes *how an existing file's bytes are decoded on read* (80-byte МС-Дубна format),
 not the new-file/line-input path exercised here.
 
+## 8g. Writing a file: the `К` directive and the У / I on-disk formats, traced
+
+The `К` directive (editor mode, manual §6.2.5) ends editing and writes the temp-area file
+back to a volume. The raw form is `К[/*] <ТОМ><ТФ><ЗОНА>`, where `<ТФ>` (file type) is the
+literal `*` for the МС-Дубна / ISO encoding and **absent** for the default ГОСТ encoding.
+Two sessions were traced (`cat in | dispak -t -t dimip.b6`), both starting from the cold
+`УС.КТ` prompt:
+
+```
+РЕД               <- no filename: enter LINE-INPUT mode (numeric prompts 00001 00002 …, step 1)
+СТРОКА ПЕРВАЯ     <- line 1
+СТРОКА ВТОРАЯ     <- line 2
+                  <- empty line: exit input mode -> editor mode (prompt '*')
+К 1234 0000       (session U)  |  К 1234 *0001   (session I)
+ВЫЙ
+```
+
+`РЕД` with no filename is accepted **even with no catalog set** and drops straight into
+line-input mode; the terminal dialogue is byte-identical for both sessions.
+
+### Common write machinery (`ДИРК` 05520 → `ПОДКАТ` 03656)
+Both formats share the front end: `ДИРК` parses `<ТОМ>`/`<ЗОНА>`, `ПОДКАТ` issues
+`Э50 131` to attach volume 1234 to **LUN 67** (`acc = 6777 0000 0001 1064`, `0o11064`=BCD
+`1234`) and builds the zone-I/O descriptor in `'1556'`, using the two Э70 **control-word
+templates**:
+
+| cell | value | role |
+|------|-------|------|
+| `D02450` (`ЧТНД`) | `0010030001670000` | **read** zone → memory page `06000`, LUN 67 |
+| `D02451` (`ЗПНД`) | `0000340000670000` | **write** zone ← memory page `070000`, LUN 67, zone += `<ЗОНА>` |
+
+The target zone is `template + <ЗОНА>` (e.g. `К 1234 0002` → `0000340000670002`). The write
+happens via `Э70 '1736'` reached from `03133`.
+
+### The У vs I fork (gated by the `*` type flag)
+`ПОДКАТ` (`03665`–`03671`) tests the `*` type flag — parsed into the **ПРЕФ area, cell
+`'1711'` (ПРЕФ+2)**, exactly the trailing-modifier mechanism of §8f — and forks:
+
+* **No `*` → У / ГОСТ native format** (short path, ~300 instrs). The temp area is written
+  **verbatim in DIMIP's native line format**: each line = one header word (line number in
+  bits 24-7, length `L` in the low 6 bits) followed by `L-1` words of **6-bit GOST-packed
+  text (8 chars/word)**; the file ends with the terminator `7777777777777700` (`D02453`).
+  Confirmed by writing to zone 2 (`besmtool dump 1234 --start=2 --length=1`):
+
+  ```
+  0002.0000  0047300000000104   header: line 1, L=4  (=1 header + 3 text words)
+  0002.0001  1423106013425040   GOST "СТРОКА ПЕРВАЯ" …
+  0002.0004  0047300000000204   header: line 2, L=4
+  0002.0010  7777777777777700   end-of-file terminator
+  ```
+
+* **`*` → I / ISO (КОИ-7, «МС Дубна») format** (long path, **~4500 extra instructions** = the
+  transcoding pass). The text is re-encoded to a **flat 8-bit KOI-7 byte stream, 6 bytes per
+  word, each line `\n`-terminated (`0x0a`)** — no line numbers, no length prefixes. Confirmed
+  in zone 1 / zone 3:
+
+  ```
+  0001.0000  … 43 54 50 4f 4b 41   KOI-7 "C T P O K A" = СТРОКА
+  0001.0003  … 31 83 0a            … ends with 0x0a (newline)
+  0001.0011  … ca 0a 0a            line 2 end
+  ```
+
+So the У form is the **internal editor image dumped as-is** (compact, numbered, GOST-6);
+the I form is a **portable text serialization** (KOI-7 bytes, newline-delimited). This is the
+write-side counterpart of the `РЕД`/`РЕД/*` read-side encoding choice (§8f).
+
+### Zone 0 is protected — the `<ЗОНА>=0` write is a no-op
+Both `К 1234 0000` (У) and `К 1234 *0000` (I) **write nothing**: the write control word
+collapses to `0040000000000000` (phantom LUN 0) and **no zone changes anywhere** on the
+volume (verified by dumping zones 0–13 before/after). Zone 0 is the catalog/archive zone
+(§8e), so a raw file write there is refused. Writes succeed only for **zone ≥ 1** — verified:
+У→zone 2, I→zone 1, I→zone 3 all wrote correctly, while У→zone 0 and I→zone 0 were no-ops.
+(So the intuitive "`К 1234 0000` makes a У file in zone 0" does **not** hold — pick a nonzero
+zone.)
+
+New symbols from this trace: `ЧТНД`/`ЗПНД` (`02450`/`02451`, volume read/write Э70 templates),
+`КОНФ` (`02453`, У-file end terminator).
+
 ## 9. Open questions / next-pass targets
 
 1. **Dispatcher decoded (§8a).** Remaining: trace each individual directive handler; fully
