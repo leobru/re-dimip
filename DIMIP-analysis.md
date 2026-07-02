@@ -534,6 +534,60 @@ zone.)
 New symbols from this trace: `ЧТНД`/`ЗПНД` (`02450`/`02451`, volume read/write Э70 templates),
 `КОНФ` (`02453`, У-file end terminator).
 
+## 8h. Encrypted files — the `З` flag and the cipher, traced
+
+Manual §6.2.4: `СФ <ИМЯФ> <КЗОН> [У|I|К] [З]` — the trailing **`З`** makes the file
+**encrypted** ("файл будет шифрованным"). Encryption is password‑based and only usable in a
+**keyed library**. The full working session (`dispak dimip.b6`, teletype on stdout,
+`-t -t` trace on **stderr**):
+
+```
+$КТ 1234 0 100        create catalog on vol 1234
+ПОЛ А Б               register библ А WITH key Б         (keyed library is required)
+ВОЙ А Б               log in — needs the key, else "ЧУЖОЙ КЛЮЧ"
+СФ ФШ 10 У З          create encrypted У file ФШ (10 zones); СФ lists it as  "ФШ↑ …"
+РЕД ФШ / Б            edit — the "КЛЮЧ" prompt takes the key Б
+…text…                (empty line ends input)
+К / Б                 write — "КЛЮЧ" again; the FIRST К returns error "КО 003",
+К / Б                 the SECOND К succeeds (quirk: it works the second time)
+ВЫЙ
+```
+
+Observed facts:
+- **Flag.** The `З` flag sets bit **`0002` (bit 38)** of the file's 2‑word directory entry —
+  mask **`МШИФР` (`D02433` = `0002000000000000`)**. Confirmed by diffing entries:
+  `ФШ`(encr)=`4002…` vs a plain file=`4000…`. The `СФ` listing renders an encrypted file with
+  a trailing **`↑`** (`ФШ↑`).
+- **Access gate.** Every `РЕД`/`К` on the file tests the flag at `02672` (`и МШИФР` →
+  `уза` skips when clear) and, if set, emits the **`КЛЮЧ`** prompt (`02507`), reading the key
+  via `Э53`. The typed key is packed into **`РКЛЮЧ` (`'1561'`)**. The library key itself is set
+  by `ПОЛ <идпол> <ключ>` and demanded again by `ВОЙ`.
+- **Storage.** File **content lives on the scratch archive (LUN 40)**, not on vol 1234 — only
+  the catalog/directory persists there, so dumping vol 1234 never shows file bytes; content is
+  observed via a same‑session read‑back (`РЕД`+key → `Л`).
+
+### The cipher (`ШИФР`, `03121`) — dynamically confirmed
+Called on write (and read) of an encrypted file; skips via `по G03133` when `и МШИФР`=0.
+It (de)ciphers the `070000` I/O buffer word‑by‑word using the BESM‑6 gather/scatter
+instructions (`сбр`/`рзб` = pack/unpack under mask, like PEXT/PDEP):
+
+```
+РКЛЮЧ   = packed password                         (e.g. 1037740000000000)
+ИНКЛЮЧ  = РКЛЮЧ ⊕ ВСЕЕД = ~key                     (D02370)
+М11     = popcount(~key)   (acx)                   (e.g. 046 = 38)
+per word W:  W' = сбр(W,~key)  |  (сбр(W,key) << М11)
+```
+
+i.e. a **key‑controlled stable bit‑partition of each 48‑bit word**: the bits at key‑`0`
+positions are packed into the low `popcount(~key)` bits and the bits at key‑`1` positions into
+the high bits — a reversible permutation. Verified live: a plaintext line‑header word
+`0047300000000107` → `0100000000216166`. Decryption applies the inverse (scatter, `рзб`,
+`G04645`). Wrong key ⇒ the inverse permutation is wrong ⇒ unreadable content, which is the
+point of §6.2.7.12 ("если файл шифрован … необходимо установить пароль").
+
+New symbols: `ШИФР` (`03121`), `РКЛЮЧ` (`'1561'` working key), `МШИФР` (`02433` flag mask),
+`ИНКЛЮЧ` (`02370` ~key scratch).
+
 ## 9. Open questions / next-pass targets
 
 1. **Dispatcher decoded (§8a).** Remaining: trace each individual directive handler; fully
