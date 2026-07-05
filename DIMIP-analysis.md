@@ -649,7 +649,9 @@ New symbols: `КЛЮЧКОМ` (02173), `СЛЕДСТР` (02536), `МКПСТР` 
 
 ### 8j. Low-core map (cells below the 02000 load address)
 
-All *named* low-core cells, with the evidence for each (octal addresses):
+All identified low-core cells, with the evidence for each (octal addresses). The `МП00`–`МП03`
+names are **documentation-only** (not in `dimip.sym`: naming cells 1–15 would make `findsym`
+render every small literal operand — `слиа 1(М5)`, `уиа 4(М16)`, … — as `МПxx+k`):
 
 | Cell(s) | Name | Meaning / evidence |
 |---------|------|--------------------|

@@ -12,7 +12,11 @@
 #   sym type "J"      marks the dispatch tables (ТАБДИР, АДРКОМ) so the handler
 #                     addresses packed in their words become entry points too —
 #                     this discovers the directive and script-command handlers,
-#                     including ones the trace never exercised.
+#                     including ones the trace never exercised.  J words also
+#                     render as two конк halves: A(ИМЯ) for a plain address,
+#                     м15в'ФЛ'A(ИМЯ) for flags<<15|addr15, п'…'/в'…' otherwise.
+#                     Sym type "K" gives the same rendering without seeding
+#                     code entries (for tables whose halves are not handlers).
 #
 # Output: dimip.lst
 
