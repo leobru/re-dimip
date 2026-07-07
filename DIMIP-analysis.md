@@ -676,6 +676,134 @@ render every small literal operand — `слиа 1(М5)`, `уиа 4(М16)`, … 
 | `1774` | `РАБ` | scratch; also the Э71 *input* descriptor (`*71 1774` in `ЖДИКОМ`). |
 | `1411`–`1416` | — | (unnamed) М17-workspace: main loop sets `М17=1411`, МКП sets `М17=1415`; used as operand scratch `(М17)` by the arithmetic/compare handlers. |
 
+## 8k. Subtask (ПЗ) event handling
+
+ДИМИП runs as the **главная задача** (main task); a task formed by the `Ф` directive whose
+passport carries a `ГЛА <шифр ДИМИПа>` section becomes ДИМИП's **подчинённая задача (ПЗ)**
+(subtask). The OS notifies the main task about its subtasks through the **event scale**
+(шкала событий), and ДИМИП handles those events through an event decoder.
+
+**Setup (init, `02017`–`02021`).** Three `Э53` calls arm the mechanism:
+`Э53 21` объявить события with `ВСЕЕД` (all bits); `Э53 11` set decoder address `= М15 = 03474`
+(`ДЕШСОБ`), whose 0o11-cell save field sits just before it (`пам` at `03462`); `Э53 12` mask
+`= D05771 = 0o6615`. The decoder's own gather-mask is `D05767 = 0o6614` (the `Э53`-12 mask minus
+bit 1, the alarm — which is serviced by the `Э53 17` wait itself, not gathered).
+
+**Recognized event bits — read out of the code, not the manual.** `D05771 = 0o6615` selects
+exactly the event-scale bits **{1, 3, 4, 8, 9, 11, 12}**; `D05767 = 0o6614` is the same set
+minus bit 1. To find which handler each bit reaches, follow the two decoder transforms:
+
+- `сбр D05767` (BESM-6 `apx`) compacts the gathered bits toward the senior end, preserving their
+  high→low order, so event bits `12,11,9,8,4,3` land in word bits `48,47,46,45,44,43`
+  (measured: an event in OS bit 4 yields word bit 44).
+- `нед` then returns `М16 = 49 − wordbit` (measured: word bit 44 → `М16` 5, word bit 43 → 6),
+  and `пб 03503(М16)` jumps to `03503+М16`.
+
+Composing the two gives the full bit→handler table (all arithmetic code-derived; the
+`bit 11 → ПЗНОВ` row is independently confirmed by the manual, where OS event **bit 11 =
+"появилась ПЗ"**, §5.3.85/86):
+
+| event bit | `М16` | slot | handler / meaning |
+|-----------|-------|------|-------------------|
+| **12** | 1 | `03504` | message → print ` БИБЛ:` (`D02333`) via `G02060` |
+| **11** | 2 | `03505` | **`ПЗНОВ` — «появилась ПЗ»** (subtask appeared/detached) |
+| **9**  | 3 | `03506` | **`ПЗСТОП` — subtask stopped / aborted** |
+| **8**  | 4 | `03507` | task end (`Э62 0`) |
+| **4**  | 5 | `03510` | output buffer ready → `G03530` |
+| **3**  | 6 | `03511` | terminal exchange (`Э71 ОПВЫВ`) |
+| **1**  | — | — | будильник (alarm) — masked but not gathered; wakes the `Э53 17` wait |
+
+`ДЕШСОБ` masks `ОПВЫВ+6` (`aox` at `03474`) into the gathered word to inject the terminal-exchange
+bits; in the baseline (no-subtask) sessions only bits 3 and 4 fire (`М16` = 6, 5), trace-verified.
+
+**Bit 11 confirmed on a live subtask.** `dimsession.txt` (`кт work` / `вой а` / **`ф тест`**) run
+under `dispak --subtasks` forms subtask `#041` and runs it (~10 000 instructions at PC `012xxx`,
+normal completion, no abort). The raw `Э53 17` scale carries the ПЗ event in **low bit 11**
+(`0o2010` = bits 11 + 4) at **both** the subtask's appearance and its detach — exactly `bit 11 =
+"появилась ПЗ"` (§5.3.85/86), and `сбр`+`нед` route it to `М16` = 2 → slot `03505` as derived.
+The slot's `пио G03552(М15)` reaches `ПЗНОВ` when `М15 = 0`: the decoder first latches bit 11 into
+`ОПВЫВ+6` (`03476`), then `ПЗНОВ` runs on the next pass. `ПЗНОВ` fired twice — once per transition.
+
+**dispak bug — wrong event bit on subtask termination.** `dispak --subtasks` raises bit 11
+(`EVENT_PZ_APPEARED`) at *both* the subtask's appearance **and** its termination (`tasks.c`:191 on
+exit, :395 on stop — the only subtask→master signal it emits). Appearance on bit 11 is right, but
+**termination is wrong**: DIMIP's decoder routes bit 11 → `ПЗНОВ` (03552), which *starts* the
+subtask (`Э62 61/63/64` + `Э53 31 пуск`). The handler that reads a **stopped/finished** subtask is
+`ПЗСТОП` (03571) — it issues `Э62 101` (*запрос **остановленных** ПЗ*) and `Э62 54` (stop reason) —
+and the decoder reaches it only from **event bit 9** (bit 9 → word 46 → `М16`=3 → slot 03506).
+So the **expected event bit for subtask termination is bit 9**, not bit 11. Because dispak sends
+bit 11, DIMIP re-runs `ПЗНОВ` (start) on a subtask that has already ended instead of running
+`ПЗСТОП`/`КЗПЗ`, and the subsequent `Б`/`Л` directives report `НЕТ П` (no stopped subtask —
+`Э62 101` finds none). bit 9 is not named in the extracode manual (which documents 1, 5, 11, 12,
+17, 19); it is established from DIMIP's own decoder + the `ПЗСТОП` handler semantics.
+
+**dispak bug — `Э50 151` is a stub, so `Б` sends `Э62 41` a zero queue number.** The `Б`
+directive (`ДИРБ` 05051) builds the `Э62 41` argument (fetch a subtask's print stream, 05066)
+from `ОПВЫВ+14`, whose high half must carry the subtask's **input-catalog (queue) number**.
+Data path: `Ф`→`Э50 7701` returns the queue number in `reg[016]`; to read the buffer, `ДИРБ`
+calls `G05127` (05127) = `сч ОПВЫВ+3` (channel) → **`Э50 151`** (§5.3.40, channel→queue number)
+→ `и D02362` (`м40в'377'`, top byte 48–41) → `сда 64+16` (right-shift 16, lands in `acc.l`).
+dispak's `Э50 151` (`extra.c`:1805) is unimplemented: it returns `E_UNIMP` for any nonzero
+channel and a hardcoded `acc.r = 0123` (`/* arbitrary */`) for channel 0 — placed in the **low**
+half, which DIMIP's top-byte mask discards → `acc.l = 0`. Trace: `05066: *62 41 acc=…01030000`
+(`acc.l = 0`). Two things to fix in dispak: (1) look up the real `t->catno` for the requested
+channel (`task_by_catno`/the slot table already hold it) instead of `0123`; (2) return it in the
+**top byte (48–41)** where DIMIP reads it — note this differs from the manual's stated `8-1 PP`,
+but DIMIP's `и м40в'377'` + right-shift is authoritative.
+
+**Both bugs fixed in dispak and verified** (re-run of `dimsession.txt`, 2026-07). (1) `Э50 151`
+now returns `task_self()->catno` / `slot[chan-1].catno` in bits 48–41, so `05066: *62 41` gets
+`acc.l = 0o13` (nonzero) and the `Б` directive succeeds. (2) `dispak --subtasks` now raises
+**bit 9** on subtask stop: the decoder dispatches `М16 = 3 → 03506 → ПЗСТОП`, which runs `Э62 101`
+(finds the stopped subtask, `ОПВЫВ+3 = 0o41`) and `Э62 54`, reporting **`КЗ 041 КОНЕЦ ЗАДАЧИ`**.
+The full subtask lifecycle now works: appear → bit 11 → `ПЗНОВ` (start); finish → bit 9 →
+`ПЗСТОП` (`КЗПЗ`, read buffer/reason). The old `НЕТ П` failure is gone.
+
+**`Б` reading a subtask's output buffer — verified end-to-end.** A batch session issues `б`
+before the forked subtask has finished writing `pzNNN.raw`, so `Э62 41` returns `0` ("no zone")
+and prints `НЕТ` — a *timing race*, not a bug (the manual: the buffer is readable only "после
+остановки этой задачи"). Driving DIMIP through a pty (`expect`, Enter every second until
+`КЗ 041 КОНЕЦ ЗАДАЧИ` appears, **then** `б 41`) closes the race: `Э62 41` returns `77777B` and
+`л` lists the copied stream (the subtask's `МОНИТОР-80` banner + passport, 4 lines). Two things
+the successful run needs, both of which the trace confirms: the **channel** must be given
+(`б 41`, not bare `б`) so `ОПВЫВ+3 = 41` → `Э50 151(41)` → subtask catno `0o14` → `Э62 41(0o14)`;
+and the subtask must have **stopped** so its `pz014.raw` is flushed. The ДИРБ copy path is
+annotated in `dimip.notes` (05051–05126): `Э62 41` reads the print zone (type 1) into `БУФЕР`
+(page 3 = 06000); `G04636` pulls buffer words, `G03735` packs bytes into `СТРОКА`, and
+`G04620`→`G05711` inserts each finished line into the temporary area.
+
+**The decoder `ДЕШСОБ` (`03474`).** ДИМИП does **not** enable async transitions in the monitor
+loop; instead `ЖДИКОМ` blocks on `Э53 17` ("закрыть задачу до наступления события", §5.3.79) at
+`03332`, and on wake the OS enters the decoder — **trace-confirmed: `03332` → `03474`**, not the
+fall-through. It gathers the pending masked events into `D02327` (`сбр` + `ОПВЫВ+6`), then loops
+`03477`–`03503`: if `D02327 == 0` it goes back to `Э53 17`; otherwise it pops the senior event
+bit (`нед` → `М16`), clears it, and dispatches per the table above.
+
+**`ПЗНОВ` (`03552`)** — react to "появилась ПЗ" by attaching and starting it:
+`Э62 61` (query the subtasks' ciphers/channels) → `Э62 63` (set the ПЗ save field, §5.3.128) →
+`Э62 64` (set the ПЗ event mask, §5.3.129) → `Э53 31` (start the subtask, §5.3.89). This matches
+the manual (§6.2.6): a formed ПЗ "реально начнёт считаться" only after it is started.
+
+**`ПЗСТОП` (`03571`)** — react to a stopped/finished subtask:
+`Э62 101` (query stopped ПЗ, §5.3.141) → `Э62 54` (query the abort reason in the ПЗ, §5.3.123) →
+`Э50 202` (format the reason text) → `Э62 77` (raise abort, §5.3.140) → `Э62 46` (hand over the
+terminal, §5.3.117).
+
+**Manual controls.** The three subtask directives drive the same extracodes explicitly:
+`Б` (`ДИРБ` `05051`) copies a subtask's output buffer into the temp area; `ЗП` (`ДИРЗП` `05142`)
+finishes/frees a subtask (`Э62 44` → `Э53 30` stop §5.3.88 → `Э53 33` finish §5.3.91);
+`ПП` (`ДИРПП` `05157`) starts/stops a subtask and hands it the terminal (`Э53 30/31`, `Э62 72`
+§5.3.135). The full `Э53` subtask family (24–34: query/set ПЗ event mask, declare/detach main,
+stop/start/finish) is documented in extracodes §5.3.84–5.3.92.
+
+**МКП async layer (not the monitor path).** During `<GET` terminal input, byte 5 of `VАР00`
+enables four event→macro reactions (§6.2.7.24): bit 8 `САКП`, bit 6 `ФЗПЗ` (subtask entered
+solution), bit 5 `КЗПЗ` (subtask ended), bit 1 `БУДИ` (alarm). The macro bodies are **files in
+the filesystem**, not code in the image — a grep of `dimip.bin` for those names finds nothing,
+consistent with the manual. Default enabled masks: `САКП`, `ФЗПЗ`, `КЗПЗ`.
+
+New symbols: `ДЕШСОБ` (`03474`), `ПЗНОВ` (`03552`), `ПЗСТОП` (`03571`).
+
 ## 9. Open questions / next-pass targets
 
 1. **Dispatcher decoded (§8a); МКП command table decoded and traced (§8i).** Remaining:
@@ -697,5 +825,9 @@ render every small literal operand — `слиа 1(М5)`, `уиа 4(М16)`, … 
 5. **Editor internals (§8b):** meaning of the line-header **auxiliary field** (bits 25–48);
    the exact character packing per encoding (KOI-7 / GOST / ТЕКСТ); and the
    временная-область **zone↔лист paging** that `РЕД` performs (the `Э70` window management).
+7. **Subtask events (§8k):** decoder and manual controls decoded; **bit 11 → `ПЗНОВ` confirmed
+   live** (`ф тест` under `dispak --subtasks`, subtask `#041`) — no dispak event-bit bug.
+   Remaining: exercise `ПЗСТОП` (bit 9) by stopping a subtask from the main task (`ПП`/`ЗП`
+   with the subtask still in a channel), and observe the `ФЗПЗ`/`КЗПЗ` macro invocation during `<GET`.
 6. Eventually: hand-edit `dimip.lst` into a `dimip.be` source and round-trip it through
    `asm.pl` + `verify.pl` (re-dispak workflow) to a byte-exact rebuild.
