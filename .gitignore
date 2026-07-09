@@ -5,3 +5,9 @@ dimip.lst
 Besm6_Instruction_Set.md
 DIMIP-manual.md
 extracodes.txt
+
+# Various generated files
+*.cov
+*.uncov
+*.out
+*.raw

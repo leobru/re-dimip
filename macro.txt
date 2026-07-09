@@ -1,0 +1,24 @@
+$кт 1234 0 10
+пол макро
+вой макро
+ред
+<mcr=one
+<mes=раз
+<men
+<mcr=two
+<mes=два три
+<men
+<mcr=three
+<mes=четыре пять
+<men
+<mcr=four
+<mes=вышел зайчик погулять
+<men
+
+$k
+сф
+four
+three
+two
+one
+вый

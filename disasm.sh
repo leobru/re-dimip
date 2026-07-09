@@ -21,7 +21,7 @@
 # Output: dimip.lst
 
 set -e
-DIS=${DISBESM6:-/home/leob/git/leobru/dispak-tools/disbesm6}
+DIS=${DISBESM6:-/usr/local/bin/disbesm6}
 TRACE=${TRACE:-trace}
 SYM=${SYM:-dimip.sym}
 NOTES=${NOTES:-dimip.notes}

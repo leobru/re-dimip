@@ -1,0 +1,58 @@
+#!/usr/bin/expect -f
+# Drive DIMIP under `dispak --subtasks` through a full subtask cycle:
+#   объявить пустой каталог (КТ) -> ввести текст (РЕД) -> сформировать ПЗ из
+#   временной области (Ф) -> дождаться окончания ПЗ -> прочитать её буфер вывода
+#   (Б) во временную область -> вывести его (Л).
+#
+# The point is the wait: a formed subtask runs as a separate dispak process
+# and only flushes its print stream (pzNNN.raw) when it ends, so `Б` must come
+# AFTER "КЗ NNN КОНЕЦ ЗАДАЧИ" appears (manual §6.2.6: буфер можно переписать
+# только после остановки задачи).  A piped batch session reaches `Б` too early
+# and prints НЕТ; here we press Enter once a second until the КЗ line shows,
+# capture the channel NNN from it, and only then issue `Б NNN` / `Л`.
+#
+# Usage:   expect subtask.exp [image.b6]      (image defaults to dimip.b6)
+# Needs:   a dispak with --subtasks support.
+
+set image [expr {$argc >= 1 ? [lindex $argv 0] : "dimip.b6"}]
+set timeout 5
+log_user 1
+
+spawn dispak --subtasks --coverage=subtask.cov $image 
+
+# startup, then the initial directives
+expect -re {.}
+sleep 0.1
+send "кт\r";
+send "ред\r";
+send "ШИФР 419900ЗС5^\r";
+send "ГЛА 419999^\r";
+send "ЕЕВ1А3\r";
+send "*NАМЕ SUBTASK\r";
+send "*ЕND FILЕ\r\r";
+send "ф\r"
+
+# Press Enter ~every second until the subtask signals end-of-task, grabbing
+# its channel number from "КЗ NNN КОНЕЦ ЗАДАЧИ" (leading zeros stripped).
+set chan ""
+set n 0
+set timeout 1
+while {$n < 40} {
+    expect {
+        -re {КЗ +0*([0-9]+)} { set chan $expect_out(1,string); break }
+        eof                  { break }
+        timeout              { send "\r"; incr n }
+    }
+}
+if {$chan eq ""} {
+    send_user "\n>>> subtask never reported КЗ; aborting\n"
+    send "вый\r"; expect eof; exit 1
+}
+send_user "\n>>> subtask ended on channel $chan after $n enters; reading its buffer\n"
+sleep 0.5
+
+send "б $chan 1 80\r"; sleep 1
+send "л\r";        sleep 1
+send "вый\r"
+set timeout 5
+expect eof
