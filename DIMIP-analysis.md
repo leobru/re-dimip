@@ -669,7 +669,21 @@ render every small literal operand — `слиа 1(М5)`, `уиа 4(М16)`, … 
 | `1561` | `РКЛЮЧ` | working cipher key (§8h). |
 | `1562`–`1565` | — | (`РКЛЮЧ+1..+4`) `RЕР` loop frames grow *down* from `1562` in 4-word steps. |
 | `1707` | `ПРЕФ` | `$`-prefix flag (`ФЛАГД`); `ПРЕФ-1` caches the МП char `%` during МКП line processing. |
-| `1715` | `ОПВЫВ` | Э71 descriptor: terminal line output (`*71 1715` throughout the traces). |
+| `1715` | `ОПВЫВ` | Э71 descriptor: terminal line output (`*71 1715` throughout the traces). Head `+0..+2` = the Э71 descriptor words; `+3`/`+4` are repurposed as subtask state (below); the tail `+5..+16` is a block of loosely-related monitor state cells, each named individually below. |
+| `1720` | `НКАН` | subtask channel number `<NК>` — `ДИСПАТ` packs `АРГ1`'s value into the top byte (`сбр D02442; сда 64+36`), i.e. the `Э62` channel-argument field; read by every ПЗ op (`Б`/`ЗП`/`ПП`/`ВЫБ`, `ПЗНОВ`/`ПЗСТОП`, `G05127`→`Э50 151`). Was `ОПВЫВ+3`. |
+| `1721` | `ТЕКПЗ` | channel of the currently-active (terminal-owning) subtask, `0` = none. `ПЗНОВ` claims it, `ПЗСТОП`/`G03603` release it (`нтж НКАН`), `ДИРЗП` uses it for `Э62 46` terminal handover; `ДИРФ`'s `Ф/*` also writes it. Was `ОПВЫВ+4`. |
+| `1722` | `ОПВЫВ5` | (`ОПВЫВ+5`) placeholder — thin evidence: only site is `мод ОПВЫВ5` in `ДИРС` (an index/address operand). Kept named so the tail doesn't re-anchor. |
+| `1723` | `ТЕРСОБ` | (`ОПВЫВ+6`) terminal-exchange event bits — `ДЕШСОБ` latches them into the gathered event word (`или ТЕРСОБ` at `03474`; bit r.11 is staged here at `03476` before `ПЗНОВ`). Was `ОПВЫВ+6`. |
+| `1724` | `ОПВЫВ7` | (`ОПВЫВ+7`) placeholder — thin evidence: `ОТКНД` scratch around the `Э62 60` (data-set LUN 60) release. |
+| `1725` | `ШКПЗ` | (`ОПВЫВ+8`) scale of subtask shifrs/channels — `ПЗНОВ`: `сч ШКПЗ / Э62 61 (запрос шифров ПЗ) / зп ШКПЗ`; `ДИРПП` toggles a channel bit (`нтж ШКПЗ`). Was `ОПВЫВ+8`. |
+| `1726` | `ОПВЫВ9` | (`ОПВЫВ+9`) placeholder — thin evidence: sparse ПЗ-context scratch (init-zeroed; `G03610 сч`). |
+| `1727` | `ПАДМ` | (`ОПВЫВ+10`) administrator password — loaded from the catalog at init (`2036: сч БУФЕР+3`); `ДИРД`/`ПОЛ` compare `АРГ2` against it (`нтж ПАДМ` at `05727`), mismatch → «ЧУЖОЙ КЛЮЧ». Was `ОПВЫВ+10`. |
+| `1730` | `ГОТБУФ` | (`ОПВЫВ+11`) ПЗ output-buffer-ready flags — `сч ГОТБУФ`, r.4 «буфер вывода готов» → `G03530`. Was `ОПВЫВ+11`. |
+| `1731` | `ОПВЫВ12` | (`ОПВЫВ+12`) placeholder — tentative: a field of the `Э50 114` (date + machine-number) result (`и D05756`), feeds `ДАТА` and is OR'd into headers (`G05656/G05715`). Not firmed up (date component vs. machine number). |
+| `1732` | `ОПВЫВ13` | (`ОПВЫВ+13`) placeholder — thin evidence: set once at init to `'F'` (`D02437 = 0100`) and apparently never read. |
+| `1733` | `ЗАПБУФ` | (`ОПВЫВ+14`) `Э62 41` buffer-read request base word (`катномер:32-25 \| тип/лист \| D02356`); `ДИРБ` bumps the zone number (`слц ОДИН`) until `Э62 41` returns «нет зоны». Was `ОПВЫВ+14`. |
+| `1734` | `СЧСТР` | (`ОПВЫВ+15`) output line/string counter — `G04701`: `сч СЧСТР / слц ОДИН / зп СЧСТР` (increment), reset by `ДИРПЕЧ`/catalog ops, feeds number formatting (`G03032`). |
+| `1735` | `ТОМКАТ` | (`ОПВЫВ+16`) `Э50 131` catalog-volume attach word (LUN + BCD том) — `ПОДКАТ`: `сч ТОМКАТ / Э50 131`; set by `ДИРКТ` from `<ТОМ>`. |
 | `1736` | `ОПФАЙЛ` | Э70 descriptor: library-file zone exchange (`ШИФР` increments the zone in it; `ДИРФ` builds the Э50 7701 control word from it). |
 | `1741` | `ОПКАТ` | Э70 descriptor: catalog zone 0 exchange. |
 | `1746` | `СТРОКА` | current-line buffer. |
@@ -713,8 +727,77 @@ Composing the two gives the full bit→handler table (all arithmetic code-derive
 | **3**  | 6 | `03511` | terminal exchange (`Э71 ОПВЫВ`) |
 | **1**  | — | — | будильник (alarm) — masked but not gathered; wakes the `Э53 17` wait |
 
-`ДЕШСОБ` masks `ОПВЫВ+6` (`aox` at `03474`) into the gathered word to inject the terminal-exchange
+`ДЕШСОБ` masks `ТЕРСОБ` (`ОПВЫВ+6`, `aox` at `03474`) into the gathered word to inject the terminal-exchange
 bits; in the baseline (no-subtask) sessions only bits 3 and 4 fire (`М16` = 6, 5), trace-verified.
+
+**Path to `03536` / how `АРГ3+26` (`01404`) enables it.** Word `03536` is not reached by the
+directive dispatcher directly; it is on the output-buffer-ready event path:
+
+```
+ЖДИКОМ 03331/03332  Э71, then Э53 17 wait
+  -> ДЕШСОБ 03474   gather events into D02327
+  -> 03477..03503   pick event bit 4 => М16=5
+  -> slot 03510     сч ГОТБУФ (ОПВЫВ+11); пб G03530
+  -> G03530         service output-buffer counter / Э71 output
+  -> 03535..03536   if G03323 returns zero, clear СТРОКА+10.. via loop at 03536
+```
+
+The precondition for this path is set earlier by `ДИРФ`. After successful `Э50 7701`,
+`ДИРФ` stores the formed task number in `VАР01` (`03434: зп 5`) and tests
+`АРГ3+26`:
+
+```
+03434r  сч АРГ3+26
+03435   по ГЛЦИКЛ        ; zero: plain Ф, no extra setup
+03435r  сч D02342
+03436   Э50 7710         ; nonzero: take the output-buffer setup path
+...
+03442   зп ТЕКПЗ
+        пб ГЛЦИКЛ
+```
+
+`01404` (`АРГ3+26`) becomes nonzero in the shared lexer, not in `ДИРФ` itself. Parser setup
+clears the argument scratch area at `03165`–`03166`, including `АРГ3+26`; slash-style trailing
+modifiers are then stored indirectly by `03203: зпм 24(М11)` (`/` separates the modifier, which is
+packed and left in `АРГ3+26`). **Confirmed by trace** (`dispak -t -t`, WORK volume): `ф тест`
+loads `АРГ3+26 = 0` and fires only `03431: *50 7701`; **`ф/пз тест` (`АРГ3+26 = 027447`) and
+`ф/* тест` (`АРГ3+26 = 031`) each fire `7701` then `03436: *50 7710`**. So any `Ф/<mod>` form is
+plain `Ф` plus a follow-up `Э50 7710`, gated by `АРГ3+26 ≠ 0`.
+
+The designed modifier is **`ПЗ`**, not `*`. After the `7710`, `03440–03441` load the named
+constant `ТПЗ` (`D02125`, GOST `ПЗ00≠0`), shift it right 32 to isolate the two chars `ПЗ`
+(= `027447`), and XOR it with `АРГ3+26`:
+
+```
+03440  сч ТПЗ / сда 64+32   ; acc = 'ПЗ' = 027447   (D02125 >> 32)
+03441  нтж АРГ3+26          ; ω = 0  iff modifier == 'ПЗ'
+       по ГЛЦИКЛ            ; Ф/ПЗ  → ω=0 → return (no ТЕКПЗ)
+03442  зп ТЕКПЗ           ; Ф/* (or any non-ПЗ) → arm the output-buffer-ready event
+       пб ГЛЦИКЛ
+```
+
+So `Ф/ПЗ` is the intended special case (there is a dedicated `ТПЗ` constant to recognise it):
+form + `7710`, then a clean return. `Ф/*` — or any other `/mod` — is the *"not ПЗ"* fall-through:
+form + `7710`, then `зп ТЕКПЗ`, which is what arms event bit 4 (`→ 03536`) on the
+output-buffer-ready path above. (`АРГ3+26 = 027447` is exactly `ТПЗ >> 32`, so the match is exact.)
+
+### `Э50 7710` — undocumented formation-family follow-up
+The МОНИТОР extracode manual documents only `AИСП = 7701` for the formation family (§5.3.67);
+the nearest queries are `215` (input-stream info, §5.3.62) and `7702` (where-am-I). **`7710` is
+not in the manual**, and **dispak does not implement it** — `extra.c` handles `07701`
+(`exform()`) and `07702` and drops everything else into the `E50 %04o` stub (`E_UNIMP`). The
+`E_UNIMP` is caught by DIMIP's abort handler and control returns to `ГЛЦИКЛ`, so `03437–03442`
+never run live: under dispak both `Ф/ПЗ` and `Ф/*` are indistinguishable from `Ф` (same `ТКН0…`
+passport; `7710` just prints `E50 7710`). The `ПЗ`/`*` branch above is visible only statically.
+
+What DIMIP intends by `7710`, read off the usage: it is issued **only after a successful `7701`**,
+with `сумматор = D02342 = 7777777700001342` (bits 48–25 all-ones, bits 24–1 = `01342`) — a
+query/status-shaped word, not the start/end task-text descriptor `7701` uses (`D02401`,
+bits 48–40 = `772` = "form from disk"). Its return is only *inspected and reported*
+(`03437 нтж ВСЕЕД / пе G02067` takes an all-ones return to a message template `ЗАГБУФ`), never fed
+back into the task text. This reads as a **status/confirmation query about the just-formed task**
+(the mirror of the perforation `form ↔ разгрузка` pair) — most pointedly a subordinate-task (`ПЗ`)
+receipt, given the `Ф/ПЗ` modifier that requests it; the exact return format is undocumented.
 
 **Bit 11 confirmed on a live subtask.** `dimsession.txt` (`кт work` / `вой а` / **`ф тест`**) run
 under `dispak --subtasks` forms subtask `#041` and runs it (~10 000 instructions at PC `012xxx`,
@@ -722,7 +805,7 @@ normal completion, no abort). The raw `Э53 17` scale carries the ПЗ event in 
 (`0o2010` = bits 11 + 4) at **both** the subtask's appearance and its detach — exactly `bit 11 =
 "появилась ПЗ"` (§5.3.85/86), and `сбр`+`нед` route it to `М16` = 2 → slot `03505` as derived.
 The slot's `пио G03552(М15)` reaches `ПЗНОВ` when `М15 = 0`: the decoder first latches bit 11 into
-`ОПВЫВ+6` (`03476`), then `ПЗНОВ` runs on the next pass. `ПЗНОВ` fired twice — once per transition.
+`ТЕРСОБ` (`ОПВЫВ+6`, `03476`), then `ПЗНОВ` runs on the next pass. `ПЗНОВ` fired twice — once per transition.
 
 **dispak bug — wrong event bit on subtask termination.** `dispak --subtasks` raises bit 11
 (`EVENT_PZ_APPEARED`) at *both* the subtask's appearance **and** its termination (`tasks.c`:191 on
@@ -739,9 +822,9 @@ bit 11, DIMIP re-runs `ПЗНОВ` (start) on a subtask that has already ended i
 
 **dispak bug — `Э50 151` is a stub, so `Б` sends `Э62 41` a zero queue number.** The `Б`
 directive (`ДИРБ` 05051) builds the `Э62 41` argument (fetch a subtask's print stream, 05066)
-from `ОПВЫВ+14`, whose high half must carry the subtask's **input-catalog (queue) number**.
+from `ЗАПБУФ` (`ОПВЫВ+14`), whose high half must carry the subtask's **input-catalog (queue) number**.
 Data path: `Ф`→`Э50 7701` returns the queue number in `reg[016]`; to read the buffer, `ДИРБ`
-calls `G05127` (05127) = `сч ОПВЫВ+3` (channel) → **`Э50 151`** (§5.3.40, channel→queue number)
+calls `G05127` (05127) = `сч НКАН` (channel) → **`Э50 151`** (§5.3.40, channel→queue number)
 → `и D02362` (`м40в'377'`, top byte 48–41) → `сда 64+16` (right-shift 16, lands in `acc.l`).
 dispak's `Э50 151` (`extra.c`:1805) is unimplemented: it returns `E_UNIMP` for any nonzero
 channel and a hardcoded `acc.r = 0123` (`/* arbitrary */`) for channel 0 — placed in the **low**
@@ -755,7 +838,7 @@ but DIMIP's `и м40в'377'` + right-shift is authoritative.
 now returns `task_self()->catno` / `slot[chan-1].catno` in bits 48–41, so `05066: *62 41` gets
 `acc.l = 0o13` (nonzero) and the `Б` directive succeeds. (2) `dispak --subtasks` now raises
 **bit 9** on subtask stop: the decoder dispatches `М16 = 3 → 03506 → ПЗСТОП`, which runs `Э62 101`
-(finds the stopped subtask, `ОПВЫВ+3 = 0o41`) and `Э62 54`, reporting **`КЗ 041 КОНЕЦ ЗАДАЧИ`**.
+(finds the stopped subtask, `НКАН = 0o41`) and `Э62 54`, reporting **`КЗ 041 КОНЕЦ ЗАДАЧИ`**.
 The full subtask lifecycle now works: appear → bit 11 → `ПЗНОВ` (start); finish → bit 9 →
 `ПЗСТОП` (`КЗПЗ`, read buffer/reason). The old `НЕТ П` failure is gone.
 
@@ -766,7 +849,7 @@ and prints `НЕТ` — a *timing race*, not a bug (the manual: the buffer is re
 `КЗ 041 КОНЕЦ ЗАДАЧИ` appears, **then** `б 41`) closes the race: `Э62 41` returns `77777B` and
 `л` lists the copied stream (the subtask's `МОНИТОР-80` banner + passport, 4 lines). Two things
 the successful run needs, both of which the trace confirms: the **channel** must be given
-(`б 41`, not bare `б`) so `ОПВЫВ+3 = 41` → `Э50 151(41)` → subtask catno `0o14` → `Э62 41(0o14)`;
+(`б 41`, not bare `б`) so `НКАН = 41` → `Э50 151(41)` → subtask catno `0o14` → `Э62 41(0o14)`;
 and the subtask must have **stopped** so its `pz014.raw` is flushed. The ДИРБ copy path is
 annotated in `dimip.notes` (05051–05126): `Э62 41` reads the print zone (type 1) into `БУФЕР`
 (page 3 = 06000); `G04636` pulls buffer words, `G03735` packs bytes into `СТРОКА`, and
@@ -775,7 +858,7 @@ annotated in `dimip.notes` (05051–05126): `Э62 41` reads the print zone (type
 **The decoder `ДЕШСОБ` (`03474`).** ДИМИП does **not** enable async transitions in the monitor
 loop; instead `ЖДИКОМ` blocks on `Э53 17` ("закрыть задачу до наступления события", §5.3.79) at
 `03332`, and on wake the OS enters the decoder — **trace-confirmed: `03332` → `03474`**, not the
-fall-through. It gathers the pending masked events into `D02327` (`сбр` + `ОПВЫВ+6`), then loops
+fall-through. It gathers the pending masked events into `D02327` (`сбр` + `ТЕРСОБ`, `ОПВЫВ+6`), then loops
 `03477`–`03503`: if `D02327 == 0` it goes back to `Э53 17`; otherwise it pops the senior event
 bit (`нед` → `М16`), clears it, and dispatches per the table above.
 

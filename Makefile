@@ -7,7 +7,7 @@ dimip.lst: dimip.bin dimip.notes dimip.sym
 subtask.cov: subtask.exp
 	./subtask.exp
 
-combined.cov: composite.cov subtask.cov macro.cov
+combined.cov: composite.cov subtask.cov macro.cov mkp.cov
 	./combine_coverage.py $^ > $@
 
 dimip.uncov: dimip.lst combined.cov
