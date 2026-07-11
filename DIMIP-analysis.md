@@ -70,7 +70,7 @@ pairs per word; see `dimip.lst`):
 | 02006 | `Э50 102` — set **number of intercepted aborts**. |
 | 02007 | `Э63 3` — **reserve CPU time for abort processing** (info `D02505`). |
 | 02010 | `Э50 114` — request **date & machine number**. |
-| 02011–02016 | Build flag/mask words (`'1731'`, `'1732'`…) from constants `D02164/D02346/D02347/D02350/D02437`. |
+| 02011–02016 | Build flag/mask words (`'1731'`, `'1732'`…) from constants `D02164/D02346/D02347/D02350/ENDMRK`. |
 | 02017 | `Э53 21` — **declare/clear events** (init the event scale). |
 | 02020 | `Э53 11` — set **event-decoder (дешифратор) address**. |
 | 02021 | `Э53 12` — set **event-scale mask** (`D05771`). |
@@ -617,14 +617,14 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
   file call. Init: `М17:=01415` (МКП context), КОТ:=0, condition scale `'1560':=0`, cell 1
   (`VАР00`) := default directive char `<` + МП char `%`; then catalog search + line loop.
   (`<МК` at the prompt is NOT the call syntax — it errors `ФАЙЛА <МК НЕТ`; bare `МК` is.)
-- **Command table `КЛЮЧКОМ`** (`02173`–`02227`, 29 keys, high 24 bits = 3 GOST chars):
+- **Command table `КЛЮКОМ`** (`02173`–`02227`, 29 keys, high 24 bits = 3 GOST chars):
   `SIТ SТ NАМ SUВ INF МUL МЕХ '   ' DIV RЕР АDD LЕТ СLО UNР SWI МЕS WRI GЕТ FIN СОN СНЕ
   FОR ОРЕ RЕА LАВ IGЕ ЕLS IЕQ ЕND`. vs the manual: **no** `UNТ/SIZ/RАN/МСR/МЕN`;
   **undocumented** `СОN`, `СНЕ`, `LАВ` (`LАВ` closes a `RЕР` loop = the manual's `UNТ`).
   Parallel `АДРКОМ` (`02237`–`02273`) holds handler addresses + pre-dispatch flags.
 - **Line processing** (`МКПСТР 02537`): non-`<` lines → temp area (`G04622`); `<`-lines →
-  `СКАНКОМ` → `ДИСПКОМ` → handler; unknown `<ИМЯМ` (with М12=0) → `МАКВЫЗ 02566` = nested
-  macro call. Handlers return via `СЛЕДСТР 02536` (also the comment handler); end of file /
+  `СКНКОМ` → `ДСПКОМ` → handler; unknown `<ИМЯМ` (with М12=0) → `МАКВЫЗ 02566` = nested
+  macro call. Handlers return via `СЛДСТР 02536` (also the comment handler); end of file /
   `<МЕХ` → `КОНМАК 03673`: decrement macro-call level (byte of cell 1), level 0 → `ГЛЦИКЛ`.
 - **Macro variables**: `МПn` = 4 words at cells `4n+1..4n+4` (`VАР00`=1–4, `МП10`=51₈–54₈,
   verified); `АДРМП 04102` resolves n→М4. Text УПП, `0377` terminator. КОТ = byte of
@@ -636,7 +636,7 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
   execute, 1 = ignore; depth ≤47 = 48-bit word). `IЕQ/IGЕ` push 0; a false condition jumps
   into `КОМЕLS` which **inverts bit0**; `ЕND` pops (shift right). While ignoring, `МКПСТР`
   scans only the last 4 keys (`М13=-3`: `IGЕ ЕЛS IЕQ ЕND`) — everything else is skipped
-  (verified: the `<МЕS=НЕТ` between `ЕLS`/`ЕND` never reached `ДИСПКОМ`).
+  (verified: the `<МЕS=НЕТ` between `ЕLS`/`ЕND` never reached `ДСПКОМ`).
 - **Channels** (`ОРЕ/RЕА/WRI/FОR/FIN/СЛО`, НК=1..3): per-channel block at `'1557'+20₈·N`
   (`1577/1617/1637`): Э70 descriptor, line counter, file cipher key. Encrypted files are
   de/re-ciphered per zone on channel I/O (`G04552`/`КОМСЛО` use `рзб`/`сбр` with `ИНКЛЮЧ`,
@@ -644,7 +644,7 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
 - **Arithmetic** (`АDD/SUВ/МUL/DIV`, adjacent handlers `03777`–`04003`): integers as decimal
   text, shared tail `G04007/G04011` converts result back to text into the МП.
 
-New symbols: `КЛЮЧКОМ` (02173), `СЛЕДСТР` (02536), `МКПСТР` (02537), `МАКВЫЗ` (02566),
+New symbols: `КЛЮКОМ` (02173), `СЛДСТР` (02536), `МКПСТР` (02537), `МАКВЫЗ` (02566),
 `КОНМАК` (03673), `АДРМП` (04102). All 28 `КОМxxx` handlers annotated in `dimip.notes`.
 
 ### 8j. Low-core map (cells below the 02000 load address)
@@ -679,8 +679,8 @@ render every small literal operand — `слиа 1(М5)`, `уиа 4(М16)`, … 
 | `1726` | `ОПВЫВ9` | (`ОПВЫВ+9`) placeholder — thin evidence: sparse ПЗ-context scratch (init-zeroed; `G03610 сч`). |
 | `1727` | `ПАДМ` | (`ОПВЫВ+10`) administrator password — loaded from the catalog at init (`2036: сч БУФЕР+3`); `ДИРД`/`ПОЛ` compare `АРГ2` against it (`нтж ПАДМ` at `05727`), mismatch → «ЧУЖОЙ КЛЮЧ». Was `ОПВЫВ+10`. |
 | `1730` | `ГОТБУФ` | (`ОПВЫВ+11`) ПЗ output-buffer-ready flags — `сч ГОТБУФ`, r.4 «буфер вывода готов» → `G03530`. Was `ОПВЫВ+11`. |
-| `1731` | `ОПВЫВ12` | (`ОПВЫВ+12`) placeholder — tentative: a field of the `Э50 114` (date + machine-number) result (`и D05756`), feeds `ДАТА` and is OR'd into headers (`G05656/G05715`). Not firmed up (date component vs. machine number). |
-| `1732` | `ОПВЫВ13` | (`ОПВЫВ+13`) placeholder — thin evidence: set once at init to `'F'` (`D02437 = 0100`) and apparently never read. |
+| `1731` | `ОПВВ12` | (`ОПВЫВ+12`) placeholder — tentative: a field of the `Э50 114` (date + machine-number) result (`и D05756`), feeds `ДАТА` and is OR'd into headers (`G05656/G05715`). Not firmed up (date component vs. machine number). |
+| `1732` | `ОПВВ13` | (`ОПВЫВ+13`) placeholder — thin evidence: set once at init to `'F'` (`ENDMRK = 0100`) and apparently never read. |
 | `1733` | `ЗАПБУФ` | (`ОПВЫВ+14`) `Э62 41` buffer-read request base word (`катномер:32-25 \| тип/лист \| D02356`); `ДИРБ` bumps the zone number (`слц ОДИН`) until `Э62 41` returns «нет зоны». Was `ОПВЫВ+14`. |
 | `1734` | `СЧСТР` | (`ОПВЫВ+15`) output line/string counter — `G04701`: `сч СЧСТР / слц ОДИН / зп СЧСТР` (increment), reset by `ДИРПЕЧ`/catalog ops, feeds number formatting (`G03032`). |
 | `1735` | `ТОМКАТ` | (`ОПВЫВ+16`) `Э50 131` catalog-volume attach word (LUN + BCD том) — `ПОДКАТ`: `сч ТОМКАТ / Э50 131`; set by `ДИРКТ` from `<ТОМ>`. |
@@ -891,7 +891,7 @@ New symbols: `ДЕШСОБ` (`03474`), `ПЗНОВ` (`03552`), `ПЗСТОП` (`
 
 1. **Dispatcher decoded (§8a); МКП command table decoded and traced (§8i).** Remaining:
    the `АДРКОМ` per-entry **flag bits** (only the "pre-resolve АРГ1 as МП" flag is
-   identified); the second table living in the **low 24 bits** of the `КЛЮЧКОМ` words
+   identified); the second table living in the **low 24 bits** of the `КЛЮКОМ` words
    (alphabetical A–Z pattern); semantics of the undocumented `СОN`/`СНЕ` handlers; dynamic
    verification of `LАВ`/`RЕР` loops, `SWI`, `SIТ`, channels (`ОРЕ`…`СЛО`).
 2. **Archive (§8c, §8e):** catalog *creation* now traced (`$КТ`/`ПОЛ` build zone 0 in `06000`
@@ -904,7 +904,7 @@ New symbols: `ДЕШСОБ` (`03474`), `ПЗНОВ` (`03552`), `ПЗСТОП` (`
 3. **Low-core variables:** the established ones are now named — see the map in §8j.
    Remaining unnamed: the М17-workspace `1411`–`1416`, the `АРГ3+21..+28` argument/flag
    cells, `ПРЕФ+к` flag cells, the SIТ situation table near `'1662'`.
-4. ~~Verify the text encoding of the keyword table~~ — done, see `КЛЮЧКОМ` (§8i).
+4. ~~Verify the text encoding of the keyword table~~ — done, see `КЛЮКОМ` (§8i).
 5. **Editor internals (§8b):** meaning of the line-header **auxiliary field** (bits 25–48);
    the exact character packing per encoding (KOI-7 / GOST / ТЕКСТ); and the
    временная-область **zone↔лист paging** that `РЕД` performs (the `Э70` window management).
