@@ -234,10 +234,13 @@ Lines are stored **contiguously and length-prefixed**, starting at **06000** (th
 in `М1`, = `D05773+5`). Each line is:
 
 ```
- header word:  bits 48..25  auxiliary/flag field (low bits gate special handling in G05621)
+ header word:  bits 48..25  auxiliary/flag field (low bits gate special handling in G05621;
+                            bits 30..25 = field count, consumed by symbolic <RЕА — §8l)
                bits 24..7   line NUMBER (18 bits)
                bits  6..1   LENGTH L = total words in the line, incl. header
- + (L-1) words of packed text (KOI-7 for a file opened with `РЕД … *…`)
+ + (L-1) words of text in **ГОСТ 10859**, one char per 8-bit byte (digits 000-011,
+   '.' = 016, А-Я at 040-076, Latin D F G I … from 077), SIX chars per word; a 0o377
+   byte ends the text (МКП channel reads detect the last word via МСКМАР — §8l)
 ```
 
 Because the number is stored *in each line*, numbering can be non-monotonic and even
@@ -293,7 +296,12 @@ The catalog zone holds: control words (0–5), a free/occupied **tract bitmap** 
 ```
  word 1:  file NAME — 6 GOST characters, right-justified (e.g. ТРАК, ПАМЯТЬ, ДИМИП)
  word 2:  metadata (besmtool's four 12-bit groups, high→low):
-            bits 46-45  type:  0 = У (ГОСТ text) · 1 = К (binary) · 2 = I (ISO text)
+            bits 48-45  type nibble — four independent FLAG bits (see "The type field
+                        decoded" below):  48 = created-but-never-written (the dot) ·
+                        47 = I (ISO text) · 46 = К (binary) · 45 = Б (never set by
+                        dimip.bin) · all clear = У (ГОСТ text)
+            bit  40     macro entry — displays as type М (Е40)
+            bit  38     З, encrypted (МШИФР)
             bits 36-25  0100       constant ("entry present")
             bits 24-13  length × 8 (number of tracts = field >> 3)
             bits 12-1   start zone, RELATIVE to the archive base
@@ -315,6 +323,59 @@ the live `СФ` output:
 
 (The `У/I/К` column is each file's stored **type**: `У` = ГОСТ text, `I` = ISO text,
 `К` = **binary**. Login and the `$` prefix are covered in §8d.)
+
+### The type field decoded — У / Б / К / М / I and the dot (static, byte-exhaustive)
+
+**Display** (`ДИРСФ` per-entry formatter, `05434`–`05457`): the type nibble = **bits 45–48**
+of metadata word 2 (`сда 64+44` → `М16` at `05445`); if bit 40 (`Е40`, `02432`) is set the
+index is forced to 3 (`05446`–`05447`) — that is how macro entries display as `М`. The
+two-character type string is then fetched from **`D02143+2(М16)`** (`05450`): the strings
+piggyback on the **м32 fields of the ГОСТ→КОИ-7 conversion-table rows** (the table at
+`02075`+, indexed by ГОСТ code; same dual-use-table trick
+as the МКП command keys), rows `02145`–`02163`:
+
+| nibble | string | row | | nibble | string | row |
+|:--:|:--:|:--:|---|:--:|:--:|:--:|
+| 0 | `У ` | `02145` (И) | | 8 | `У.` | `02155` (Р) |
+| 1 | `Б ` | `02146` (Й) | | 9 | `Б.` | `02156` (С) |
+| 2 | `К ` | `02147` (К) | | 12 | `I.` | `02161` (Ф) |
+| 3 | `М ` | `02150` (Л) | | 14 | `..` | `02163` (Ц) |
+| 4 | `I ` | `02151` (М) | | | | |
+
+So the nibble is four independent flag bits, and each bit is proven by its writer:
+
+- **bit 48 = "created, never yet opened for write" — the dot.** `СФ`-create stores it
+  (below); the file-open paths **toggle** it with `нтж Е48` (`Е48` = `02431`): the common
+  open at `G02666` (`02666`–`02667`) and МКП `ОРЕ` (`КОМОРЕ`, toggle at `04060`), which calls
+  `ЗАПКАТ` only when the toggle *clears* the bit — i.e. the first open of a fresh file
+  permanently drops the dot on disk (`У.`→`У `, `I.`→`I `). `G02666` also saves the
+  pre-toggle **bit 47** as the ISO flag `ПРЕФ+2` (`сда 64-1; и Е48`, `02667`–`02670`),
+  independently confirming bit 47 = I.
+- **bit 47 = I, bit 46 = К, none = У.** `СФ <ИМЯФ> <КЗОН> [У|I|К]`-create (`05374`–`05406`):
+  the type letter in `АРГ3` is matched (low byte, `МСК8`) against words `02257`–`02262` —
+  low bytes `000` (no letter) / `063` (`У`) / `102` (Latin `I`) / `052` (`К`) — the
+  ГОСТ 10859 codes — and the stored nibble is the low 4 bits of the parallel table `02264`–`02267`
+  (`сч D02262+2(М7); сда 64-44` at `05403`): default → **8** (`У.`), `У` → **8**, `I` → **12**
+  (`I.`), `К` → **2** (`К `, no dot — К zones are written by `Э70` from лист 3, not through
+  open/write). Matches the live examples above: ТРАК `0000`=У, ДИМИП `1000`=bit 46=К,
+  ПАМЯТЬ `2000`=bit 47=I.
+- **bit 40 = macro (`Е40`), not part of the nibble.** The `$К` macro-library writer
+  (`05550`–`05561`) builds each macro's catalog entry with `или Е40` (`05552`); display
+  forces `М ` as above. (Manual §6.2.7.23: macro names appear in `СФ` with type `М`.)
+- **bit 38 = З (encrypted).** At create, `МШИФР` (`02433` = bit 38) is ORed into word 2 iff
+  the `З` argument is present (`05404`–`05406`).
+
+**Type `Б` is unreachable from dimip.bin.** `Б` is bit 45 (nibble 1, or 9 dotted), and no
+code path sets it: there is no bit-45 constant in the image (only `Е40`/`Е48`/`МШИФР`), and
+an enumeration of *every* store to a catalog entry word — create (`05403`–`05406`), the
+macro writer (`05550`–`05561`), the two `Е48` open-toggles (`02666`, `04060`), rename
+`ДИРЗАМ` (`05222`, name word only), delete `ОСВЗОН` (`05345`, clears the entry), catalog
+init in `ДИРКТ` (zone wipe at `05271`) — writes only nibbles 8/12/2, `Е40`, or toggles
+bit 48. So nibbles 1, 9 and 14 (`Б `, `Б.`, `..`) are **display-only** in this build: they
+can appear in `СФ` output only if the bit arrives from outside — another program/build
+writing the `*ДИМИП` archive format, or a hand-edited catalog zone. The paired `Б `/`Б.`
+strings do show the format *reserved* Б as a first-class type with the same
+created→written lifecycle as У and I.
 
 ## 8d. Login path and the `$` prefix
 
@@ -494,18 +555,25 @@ happens via `Э70 '1736'` reached from `03133`.
 `ПОДКАТ` (`03665`–`03671`) tests the `*` type flag — parsed into the **ПРЕФ area, cell
 `'1711'` (ПРЕФ+2)**, exactly the trailing-modifier mechanism of §8f — and forks:
 
-* **No `*` → У / ГОСТ native format** (short path, ~300 instrs). The temp area is written
+* **No `*` → У / native format** (short path, ~300 instrs). The temp area is written
   **verbatim in DIMIP's native line format**: each line = one header word (line number in
-  bits 24-7, length `L` in the low 6 bits) followed by `L-1` words of **6-bit GOST-packed
-  text (8 chars/word)**; the file ends with the terminator `7777777777777700` (`D02453`).
-  Confirmed by writing to zone 2 (`besmtool dump 1234 --start=2 --length=1`):
+  bits 24-7, length `L` in the low 6 bits) followed by `L-1` words of **ГОСТ 10859 text,
+  one char per 8-bit byte, 6 chars per word** (§8b); the file ends with the terminator
+  `7777777777777700` (`D02453`). Confirmed by writing to zone 2
+  (`besmtool dump 1234 --start=2 --length=1`):
 
   ```
   0002.0000  0047300000000104   header: line 1, L=4  (=1 header + 3 text words)
-  0002.0001  1423106013425040   GOST "СТРОКА ПЕРВАЯ" …
+  0002.0001  1423106013425040   "СТРОКА" = ГОСТ bytes 061 062 060 056 052 040
   0002.0004  0047300000000204   header: line 2, L=4
   0002.0010  7777777777777700   end-of-file terminator
   ```
+
+  (An earlier revision of this section said "6-bit GOST-packed, 8 chars/word"; the code
+  is indeed ГОСТ 10859 but the packing is one char per **byte** — `061 062 060 056 052 040`
+  packed six 8-bit bytes per word reproduces `1423106013425040` exactly, and the
+  byte-oriented machinery (`FR1x6` char→word division, the per-byte marker mask `МСКМАР`)
+  confirms it.)
 
 * **`*` → I / ISO (КОИ-7, «МС Дубна») format** (long path, **~4500 extra instructions** = the
   transcoding pass). The text is re-encoded to a **flat 8-bit KOI-7 byte stream, 6 bytes per
@@ -518,7 +586,7 @@ happens via `Э70 '1736'` reached from `03133`.
   0001.0011  … ca 0a 0a            line 2 end
   ```
 
-So the У form is the **internal editor image dumped as-is** (compact, numbered, GOST-6);
+So the У form is the **internal editor image dumped as-is** (compact, numbered, ГОСТ-byte);
 the I form is a **portable text serialization** (KOI-7 bytes, newline-delimited). This is the
 write-side counterpart of the `РЕД`/`РЕД/*` read-side encoding choice (§8f).
 
@@ -887,17 +955,121 @@ consistent with the manual. Default enabled masks: `САКП`, `ФЗПЗ`, `КЗ
 
 New symbols: `ДЕШСОБ` (`03474`), `ПЗНОВ` (`03552`), `ПЗСТОП` (`03571`).
 
+## 8l. МКП file channels — `<ОРЕ` / `<RЕА` / `<WRI` / `<СLО` and the record format, traced
+
+Verified by re-running the `mkp.txt` session (`dispak -p dimip.b6 < mkp.txt`), which
+round-trips a file through the channel API — `<ОРЕ=звых=2=W`, two `<WRI`, `<СLО=2`, then
+`<ОРЕ=звых=1` and three `<RЕА` — and by dumping what it wrote (ЗВЫХ = volume 1234 zone 4).
+
+### Channel state — 16 words per channel (`М13 = 16·к`)
+
+| cell | role |
+|------|------|
+| `ОПКАН`+16к (`'1557'`) | Э70 control word: buffer page in the left half, LUN+zone in the right; **CW bit 40 (`Э70` read bit) doubles as the channel direction flag** |
+| `ШКУСЛ`+16к (`'1560'`) | current record pointer (absolute address inside the buffer page); 0 = channel closed |
+| `РКЛЮЧ`+16к (`'1561'`) | open counter/limit (decremented by `СLО`) |
+| `РКЛЮЧ+1`+16к | cipher key from the `/КЛЮЧ` suffix (`АРГ3+28`); nonzero → each zone is decrypted on read (`G04552`) / encrypted on flush (`G04511`), the §8h cipher |
+| `РКЛЮЧ+2`+16к … | up to 13 field names set by `<NАМ=к=имя1=…` (`КОМNАМ` 04327) |
+
+### `<ОРЕ` (`КОМОРЕ` 04025) — three forms
+
+- **`<ОРЕ=файл`** (no channel): info only — zone → П01, length → П02, type string
+  (`D02143+2`, §8c) → П03 (cells 5/9/13). Live: `БЕЗКАН З=7 Д=3 Т=У`.
+- **`<ОРЕ=файл=к`** (no mode letter): **read**. Builds `ОПКАН` = `к<<30 | file base CW`,
+  stores the key, toggles the catalog dot bit (§8c), then `G04552` (04552) pages the first
+  zone into the buffer (`слц ОДИН` on the zone field + `Э70`, then the key decrypt) and sets
+  `ШКУСЛ` to the buffer base. `<ОРЕ==к` (no filename) opens the **temp area** itself
+  (`ОПВЫВ7` base) as the channel.
+- **`<ОРЕ=файл=к=X`** (any mode letter, e.g. `W`): **write** — `G04076` flips CW bit 40
+  read→write. The specific letter **`С`** (matched against the low byte of word `02255` =
+  `061` — another low-byte overlay on the МКП dispatch table) first walks headers to the
+  end-of-file marker: **append**. Both fall through to the same write setup.
+
+### The record format (= the У native format, §8b/§8g)
+
+What the session wrote into zone 4, read back as `ЧИТ1 89` / `ЧИТ2 1`:
+
+```
+0004.0000  0000000000000002    header: L=2 words incl. header, record# 0
+0004.0001  010 011 377 0 0 0   body: "89" + 0o377 end-of-text, zero-padded
+0004.0002  0000000000000002    header: L=2
+0004.0003  001 377 002 002 016 003   П11's storage word copied verbatim
+0004.0004  7777777700000000    EOF marker written by СLО (= D02337<<24)
+```
+
+- **Header**: low 6 bits (`МСК6` — encoded as `п'D'`!) = record length **including the
+  header**; bits 7–24 (`D02443`) = record number (`<WRI` writes 0; an extra numeric
+  argument, cell `АРГ3+27`, is ORed in `<<6` → numbered records); bits 25–30 = field count
+  (consumed only by the symbolic `<RЕА` path, `G04264`; 0 → error 6).
+- **Body**: ГОСТ 10859 text, one char per 8-bit byte, 6 chars/word, terminated by a
+  `0o377` byte. Both
+  `КОМWRI`'s and `КОМRЕА`'s copy loops delimit the last word with **`МСКМАР`** (`02445` =
+  the high bit of each of the six bytes — only `0o377` has it in normal text), and the
+  general byte-fetcher `G04116` (04116) flags `byte == 255` (`слиа -255`) as end-of-text.
+- **End of file**: any word with **L = 0 but nonzero content** — `СLО` writes
+  `7777777700000000` (three `377` bytes = `D02337<<24`), the editor's `К` writes `КОНФ`
+  `7777777777777700`; both satisfy the same test (`и МСК6` = 0, word ≠ 0 → `G03527`).
+  An **all-zero word** means "zone exhausted": `G04552` pages in the file's next zone and
+  the scan continues. Records do not span zones.
+
+### `<RЕА` (`КОМRЕА` 04244) — three addressing modes
+
+- **Sequential** (`<RЕА=П=к`): copy the record at `ШКУСЛ` — body words after the header
+  into the П variable (или into `СТРОКА+1`, and thence to `МКПСТР` as a scenario line, if
+  no variable is given — static reading, not exercised), stopping at the `МСКМАР` word —
+  then advance one record (`G04304`). Landing on the EOF word zeroes `ШКУСЛ` (channel
+  closed) and takes the `G03527` EOF reaction: the session's third read left П15 stale
+  (`ЧИТ3 1`) because `G04567` then returns error 3.
+- **By record number** (numeric 3rd arg, `G04347` 04347): find the zone via the per-zone
+  first-record index at `'620'/'621'` (built when temp-area zones are flushed, `G03104`;
+  the seek re-points the channel with `ОПВЫВ7`-based zones, so this mode is for the
+  **temp-area channel**), `Э70` it in if needed, then walk headers by L (`G04364`) to an
+  exact match on the record-number field.
+- **By field name** (symbolic 3rd arg — digits distinguished from letters by the
+  `слц МСКЖ; и МСКМАР` parallel-byte trick): look the name up among the `<NАМ` names,
+  then use the header's field count + `FR1x6` byte indexing to extract the field
+  (`G04264`/`G04273`).
+
+An extra argument in `АРГ3+27` makes `<RЕА` also store the current record's **number**
+(converted to text, `0o377`-terminated) into that variable.
+
+### `<WRI` (`КОМWRI` 04532) and `<СLО` (`КОМСLО` 04505)
+
+`WRI`: copy the variable's storage words verbatim until the `МСКМАР` word, then store the
+header **at the record start = length by subtraction** (`вчоб ШКУСЛ(М13)`); page-boundary
+overflow flushes the zone (`G04511` 04511: encrypt if keyed + `Э70` write) and retries.
+`СLО`: requires a write-mode channel (the `G04567` guard inverted), stores the EOF word
+`D02337<<24` at the current position, flushes the final zone, decrements `РКЛЮЧ`, zeroes
+`ШКУСЛ`.
+
+### Guards, errors, and the missing type check
+
+`G04567` (04567) resolves `к` → `М13/М12` and returns `CW & Е40`: `КОМRЕА` errors if the
+read bit is **clear** (opened with a mode letter), `КОМWRI`/`КОМСLО` if it is **set**.
+Channel errors do **not** abort the macro: `G04333` (04333) records the code in a VАР00
+field (cell 1) and continues — that is why `<ОРЕ=нетфайл=3` is followed by `ПОСЛЕ-ОШ` in
+the live output. Identified codes: 3 = channel not open, 4 = wrong direction, 6 = record
+has no fields.
+
+**No file-type check anywhere in the path**: `КОМОРЕ` never looks at the catalog type
+nibble (§8c), and `КОМRЕА` unconditionally parses header words. So a channel can only
+meaningfully read **У-format** files (or the temp area); an `I` file (flat KOI-7 bytes +
+`0x0a`, §8g) would have its first word misread as a header. The `Т=` info form is the only
+type-aware piece of `<ОРЕ`.
+
 ## 9. Open questions / next-pass targets
 
 1. **Dispatcher decoded (§8a); МКП command table decoded and traced (§8i).** Remaining:
    the `АДРКОМ` per-entry **flag bits** (only the "pre-resolve АРГ1 as МП" flag is
    identified); the second table living in the **low 24 bits** of the `КЛЮКОМ` words
    (alphabetical A–Z pattern); semantics of the undocumented `СОN`/`СНЕ` handlers; dynamic
-   verification of `LАВ`/`RЕР` loops, `SWI`, `SIТ`, channels (`ОРЕ`…`СЛО`).
+   verification of `LАВ`/`RЕР` loops, `SWI`, `SIТ`. Channels (`ОРЕ`…`СЛО`) are now traced —
+   §8l; still unexercised there: `<RЕА` by number / by field name, `<FIN`, append mode `С`.
 2. **Archive (§8c, §8e):** catalog *creation* now traced (`$КТ`/`ПОЛ` build zone 0 in `06000`
    and write it via `ЗАПКАТ`; volume attached with `Э50 131`). Confirmed fields: `<ДАРХ>` at
    word `0002`, free-tract **bitmap** at `0005`–`0006`, `*ДИМИП` signature + идпол name at
-   `0035`/`0036`. Remaining: the rest of the catalog **control words** (0–5), the exact
+   `0035`/`0036`; the file-entry **type field** is now fully decoded, including why type `Б`
+   never appears (§8c). Remaining: the rest of the catalog **control words** (0–5), the exact
    **bitmap** encoding (tract↔bit), the full **идпол record** layout (passwords `<КЛЮЧ>`/`<ПАДМ>`,
    directory pointers — exercise `ПОЛ <ИДПОЛ> <КЛЮЧ> <ПАДМ>` with full params), and whether the
    OS `КЛЮЧАР`/`Э63` access control is used at all.
@@ -905,9 +1077,10 @@ New symbols: `ДЕШСОБ` (`03474`), `ПЗНОВ` (`03552`), `ПЗСТОП` (`
    Remaining unnamed: the М17-workspace `1411`–`1416`, the `АРГ3+21..+28` argument/flag
    cells, `ПРЕФ+к` flag cells, the SIТ situation table near `'1662'`.
 4. ~~Verify the text encoding of the keyword table~~ — done, see `КЛЮКОМ` (§8i).
-5. **Editor internals (§8b):** meaning of the line-header **auxiliary field** (bits 25–48);
-   the exact character packing per encoding (KOI-7 / GOST / ТЕКСТ); and the
-   временная-область **zone↔лист paging** that `РЕД` performs (the `Э70` window management).
+5. **Editor internals (§8b):** meaning of the line-header **auxiliary field** (bits 25–48
+   beyond the field count identified in §8l); ~~the exact character packing~~ — settled,
+   ГОСТ 10859 one char per byte, 6 chars/word (§8b/§8g/§8l); and the временная-область
+   **zone↔лист paging** that `РЕД` performs (the `Э70` window management).
 7. **Subtask events (§8k):** decoder and manual controls decoded; **bit 11 → `ПЗНОВ` confirmed
    live** (`ф тест` under `dispak --subtasks`, subtask `#041`) — no dispak event-bit bug.
    Remaining: exercise `ПЗСТОП` (bit 9) by stopping a subtask from the main task (`ПП`/`ЗП`
