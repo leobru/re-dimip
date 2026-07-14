@@ -1,0 +1,67 @@
+#!/bin/sh
+set -e
+
+cat > /tmp/bd-setup.txt <<'EOF'
+a
+$кт 1234 0000 100
+пол мкп мкп адм
+вой мкп мкп
+сф фд 3 у
+сф мкр 3 у
+вый
+EOF
+
+timeout 10 dispak -p dimip.b6 < /tmp/bd-setup.txt > /tmp/bd-setup.out 2> /tmp/bd-setup.err
+
+python3 - <<'PY'
+from pathlib import Path
+
+gost = {
+    "A": 0o040,
+    "E": 0o045,
+    "F": 0o100,
+    "G": 0o101,
+    "H": 0o055,
+    "I": 0o102,
+    "L": 0o104,
+    "M": 0o054,
+    "R": 0o107,
+    "S": 0o110,
+    "T": 0o062,
+}
+
+sep = 0o025
+end = 0o377
+
+
+def record(field1, field2, number):
+    field1_bytes = [gost[c] for c in field1]
+    field2_bytes = [gost[c] for c in field2]
+    field1_start = 8
+    field2_start = field1_start + len(field1_bytes) + 1
+    body = [field1_start - 1, field2_start - 1]
+    body += field1_bytes + [sep] + field2_bytes + [end]
+    while len(body) % 6:
+        body.append(end)
+
+    words = [(2 << 24) | (number << 6) | (1 + len(body) // 6)]
+    words += [
+        int.from_bytes(bytes(body[index : index + 6]), "big")
+        for index in range(0, len(body), 6)
+    ]
+    return words
+
+
+words = []
+words += record("LEFT", "RIGHT", 7)
+words += record("MISS", "TARGET", 8)
+words += record("MIST", "RIGHT", 9)
+words.append(int("7777777700000000", 8))
+words += [0] * (1024 - len(words))
+
+Path("/tmp/bd-fielded-zone.bin").write_bytes(
+    b"".join(word.to_bytes(6, "big") for word in words)
+)
+PY
+
+besmtool write 1234 --start=0001 --from-file=/tmp/bd-fielded-zone.bin

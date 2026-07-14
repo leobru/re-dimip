@@ -717,7 +717,14 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
   unpacked token is copied to the second МП rather than only back into the source МП
   (`UNРВ А.В А` in `mkp.out`). `<SWI=П10=89=90` exercises the matching-switch path
   (`04476`, `04477`, `04500`, `04503`, `04504`), executing only the selected next line
-  (`SWI1`) before resuming after the skipped alternatives.
+  (`SWI1`) before resuming after the skipped alternatives. `<МЕS/Р=PRINTCOV` exercises
+  the printer-output path through `Э64 D02376` (`04172`, `04173`, `04174L`).
+- **Coverage probes that did not help yet**:
+  the documented `LЕТ=П19=П18/2=Б` form works and prints the selected byte as decimal
+  (`34` for `ABCDE` byte 2), but it still takes the nonzero-byte path and leaves
+  `04150`-`04152` uncovered. `П18/6` and uninitialized `П22/1` read as `255`, not zero.
+  `<UNР/Б=П17=.` over `A.B` works (`UNPБ2 А В`) but does not reach the remaining
+  `04464` branch.
 - **`СОN`** (`КОМСОN 04421`) is an undocumented **substring search**:
   `<СОN=VАР=TEXT` searches the text value of `VАР` for literal `TEXT`; on success it writes
   the **1-based** first-match position into `МП01` (`VАР01`), and on failure leaves `МП01`
@@ -1036,6 +1043,26 @@ round-trips a file through the channel API — `<ОРЕ=звых=2=W`, two `<WRI
 
 What the session wrote into zone 4, read back as `ЧИТ1 89` / `ЧИТ2 1`:
 
+Relevant `mkp.txt` fragment:
+
+```
+<ОРЕ=звых=2=W
+<NАМ=2=ПОЛЕ=ВТОР
+<LET=П10=12345=67890
+<LET=П11=100=фывапр
+<WRI=П10=2
+<WRI=П11=2
+<СLО=2
+<ОРЕ=звых=1
+<NАМ=1=ф1=ф2=ф3=ф4=ф5=ф6
+<RЕА=П15=1
+<МЕS=ЧИТ1 %П15
+<RЕА=П15=1
+<МЕS=ЧИТ2 %П15
+<RЕА=П15=1
+<МЕS=ЧИТ3 %П15
+```
+
 ```
 0004.0000  0000000000000002    header: L=2 words incl. header, record# 0
 0004.0001  010 011 377 0 0 0   body: "89" + 0o377 end-of-text, zero-padded
@@ -1053,6 +1080,15 @@ What the session wrote into zone 4, read back as `ЧИТ1 89` / `ЧИТ2 1`:
   `КОМWRI`'s and `КОМRЕА`'s copy loops delimit the last word with **`МСКМАР`** (`02445` =
   the high bit of each of the six bytes — only `0o377` has it in normal text), and the
   general byte-fetcher `G04116` (04116) flags `byte == 255` (`слиа -255`) as end-of-text.
+  The sequential `<RЕА=П15=1` path copies the full record body until this terminator and
+  then advances by the header length.
+- **Field separator**: the symbolic-field path does use **GOST code `025`**, i.e. `=`.
+  After `<RЕА=VАР=НК=ПОЛЕ` finds the field index (`G04264`), `G04273`/`G04116` fetches
+  successive bytes. `G04116` leaves `М11 = byte - 0377`; the copy loop then executes
+  `слиа '352'(М11)`, yielding `byte - 025`. Nonzero bytes go through `G04167`; byte
+  `025` falls through to `G04262`, writes `МСК8` (`0377`) as the output terminator, and
+  stops the field. Thus `WRI` writes text containing `=`, and named `RЕА` treats that
+  `=` as the field separator.
 - **End of file**: any word with **L = 0 but nonzero content** — `СLО` writes
   `7777777700000000` (three `377` bytes = `D02337<<24`), the editor's `К` writes `КОНФ`
   `7777777777777700`; both satisfy the same test (`и МСК6` = 0, word ≠ 0 → `G03527`).
@@ -1075,7 +1111,7 @@ What the session wrote into zone 4, read back as `ЧИТ1 89` / `ЧИТ2 1`:
 - **By field name** (symbolic 3rd arg — digits distinguished from letters by the
   `слц МСКЖ; и МСКМАР` parallel-byte trick): look the name up among the `<NАМ` names,
   then use the header's field count + `FR1x6` byte indexing to extract the field
-  (`G04264`/`G04273`).
+  (`G04264`/`G04273`), copying until GOST `025` (`=`).
 
 An extra argument in `АРГ3+27` makes `<RЕА` also store the current record's **number**
 (converted to text, `0o377`-terminated) into that variable.

@@ -4,10 +4,12 @@ dimip.lst: dimip.bin dimip.notes dimip.sym
 %.cov: %.txt coverage.sh dimip.b6
 	./coverage.sh $<
 
+bd.cov: bd.setup
+
 subtask.cov: subtask.exp
 	./subtask.exp
 
-combined.cov: composite.cov subtask.cov macro.cov mkp.cov
+combined.cov: composite.cov subtask.cov macro.cov mkp.cov bd.cov
 	./combine_coverage.py $^ | grep '^0[2-5]...:' > $@
 
 dimip.uncov: dimip.lst combined.cov
