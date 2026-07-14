@@ -690,7 +690,7 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
   FОR ОРЕ RЕА LАВ IGЕ ЕLS IЕQ ЕND`. vs the manual: **no** `UNТ/SIZ/RАN/МСR/МЕN`;
   **undocumented** `СОN`, `СНЕ`, `LАВ` (`LАВ` closes a `RЕР` loop = the manual's `UNТ`).
   Parallel `АДРКОМ` (`02237`–`02273`) holds handler addresses + pre-dispatch flags.
-- **Line processing** (`МКПСТР 02537`): non-`<` lines → temp area (`G04622`); `<`-lines →
+- **Line processing** (`МКПСТР 02537`): non-`<` lines → temp area (`LNTMP`); `<`-lines →
   `СКНКОМ` → `ДСПКОМ` → handler; unknown `<ИМЯМ` (with М12=0) → `МАКВЫЗ 02566` = nested
   macro call. Handlers return via `СЛДСТР 02536` (also the comment handler); end of file /
   `<МЕХ` → `КОНМАК 03673`: decrement macro-call level (byte of cell 1), level 0 → `ГЛЦИКЛ`.
@@ -714,8 +714,10 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
   text, shared tail `G04007/G04011` converts result back to text into the МП.
 - **New coverage cases from `dimip.uncov`**:
   `<UNР=П16/П30=.` over `A.B` exercises the alternate-output path (`04454`) where the
-  unpacked token is copied to the second МП rather than only back into the source МП
-  (`UNРВ А.В А` in `mkp.out`). `<SWI=П10=89=90` exercises the matching-switch path
+  split uses `П16` as the input but writes output starting at `П30`; the input remains
+  unchanged (`UNРВ А.В А` in `mkp.out`). A later fixed-name probe confirmed the sequence:
+  `<UNР=П60/П70=.` over `A.B.C` leaves `П60=A.B.C` and writes `П70=A`, `П71=B`, `П72=C`,
+  with count `П01=3`. `<SWI=П10=89=90` exercises the matching-switch path
   (`04476`, `04477`, `04500`, `04503`, `04504`), executing only the selected next line
   (`SWI1`) before resuming after the skipped alternatives. `<МЕS/Р=PRINTCOV` exercises
   the printer-output path through `Э64 D02376` (`04172`, `04173`, `04174L`).
@@ -724,7 +726,8 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
   (`34` for `ABCDE` byte 2), but it still takes the nonzero-byte path and leaves
   `04150`-`04152` uncovered. `П18/6` and uninitialized `П22/1` read as `255`, not zero.
   `<UNР/Б=П17=.` over `A.B` works (`UNPБ2 А В`) but does not reach the remaining
-  `04464` branch.
+  `04464` branch; further probes with `A..B` and `.A.` show `/Б` is inert in this binary
+  and empty fields are preserved with or without it.
 - **`СОN`** (`КОМСОN 04421`) is an undocumented **substring search**:
   `<СОN=VАР=TEXT` searches the text value of `VАР` for literal `TEXT`; on success it writes
   the **1-based** first-match position into `МП01` (`VАР01`), and on failure leaves `МП01`
@@ -975,7 +978,7 @@ the successful run needs, both of which the trace confirms: the **channel** must
 and the subtask must have **stopped** so its `pz014.raw` is flushed. The ДИРБ copy path is
 annotated in `dimip.notes` (05051–05126): `Э62 41` reads the print zone (type 1) into `БУФЕР`
 (page 3 = 06000); `G04636` pulls buffer words, `G03735` packs bytes into `СТРОКА`, and
-`G04620`→`G05711` inserts each finished line into the temporary area.
+`LNFIN`→`LNINS` inserts each finished line into the temporary area.
 
 **The decoder `ДЕШСОБ` (`03474`).** ДИМИП does **not** enable async transitions in the monitor
 loop; instead `ЖДИКОМ` blocks on `Э53 17` ("закрыть задачу до наступления события", §5.3.79) at
@@ -1068,13 +1071,29 @@ Relevant `mkp.txt` fragment:
 0004.0001  010 011 377 0 0 0   body: "89" + 0o377 end-of-text, zero-padded
 0004.0002  0000000000000002    header: L=2
 0004.0003  001 377 002 002 016 003   П11's storage word copied verbatim
-0004.0004  7777777700000000    EOF marker written by СLО (= D02337<<24)
+0004.0004  7777777700000000    EOF marker written by СLО (= EOFCH<<24)
 ```
 
 - **Header**: low 6 bits (`МСК6` — encoded as `п'D'`!) = record length **including the
-  header**; bits 7–24 (`D02443`) = record number (`<WRI` writes 0; an extra numeric
+  header**; bits 7–24 (`RECNO`) = record number (`<WRI` writes 0; an extra numeric
   argument, cell `АРГ3+27`, is ORed in `<<6` → numbered records); bits 25–30 = field count
   (consumed only by the symbolic `<RЕА` path, `G04264`; 0 → error 6).
+- **Field directory**: for a fielded БД record, the first `field_count` bytes of the body
+  are a directory. Directory byte `i` stores **one less than the absolute byte index** of
+  field `i`'s first text byte, counted from the start of the record header. This off-by-one
+  is not a guess: `G04264` finds the field name, checks `(header >> 24) & 077`, sets up
+  `М16=6`, then falls into `G04273`; `G04273` increments `М5` before byte fetch, so a
+  directory byte `007` points at byte index `010`. Thus a two-field body can start
+  `[007,014,"LEFT=RIGHT",0377...]`, where field 1 starts at byte 010 and field 2 at
+  byte 015. Plain `<WRI>` never builds this directory, so named `<RЕА`/`<FIN` over
+  `<WRI>` output fail with field-count zero even if the text contains `=`.
+  This does not make MKP formation impossible: a macro can still build the fielded
+  body explicitly by splitting a source value with `<UNР>` on the chosen separator,
+  measuring the field lengths with `<SIZ>` where that directive exists, computing the
+  directory byte values, prepending those bytes to the text body, and then passing the
+  already-formed record body to `<WRI>`. The local decoded `КЛЮКОМ` table does not contain
+  `SIZ`, so this is a construction route for an environment that provides the manual's
+  `<SIZ>` rather than evidence that plain `<WRI>` has a hidden directory builder.
 - **Body**: ГОСТ 10859 text, one char per 8-bit byte, 6 chars/word, terminated by a
   `0o377` byte. Both
   `КОМWRI`'s and `КОМRЕА`'s copy loops delimit the last word with **`МСКМАР`** (`02445` =
@@ -1090,10 +1109,57 @@ Relevant `mkp.txt` fragment:
   stops the field. Thus `WRI` writes text containing `=`, and named `RЕА` treats that
   `=` as the field separator.
 - **End of file**: any word with **L = 0 but nonzero content** — `СLО` writes
-  `7777777700000000` (three `377` bytes = `D02337<<24`), the editor's `К` writes `КОНФ`
+  `7777777700000000` (three `377` bytes = `EOFCH<<24`), the editor's `К` writes `КОНФ`
   `7777777777777700`; both satisfy the same test (`и МСК6` = 0, word ≠ 0 → `G03527`).
   An **all-zero word** means "zone exhausted": `G04552` pages in the file's next zone and
   the scan continues. Records do not span zones.
+
+**Dynamic BD proof (`bd.setup` + `bd.txt`).** The coverage test now creates a real catalog
+entry `ФД`, then overwrites its first data zone with three hand-formed fielded records:
+
+```
+0001.0000  0000000200000704    count=2, rec#=7, L=4
+0001.0001  0160610411240062    directory 007,014 then "LEFT"
+0001.0002  0524350220226462    "=" then "RIGHT"
+0001.0003  7777777777777777    terminator padding
+0001.0004  0000000200001004    count=2, rec#=8, L=4
+...
+0001.0010  0000000200001104    count=2, rec#=9, L=4
+...
+0001.0014  7777777700000000    EOF
+```
+
+The macro test:
+
+```
+<ОРЕ=фд=1
+<NАМ=1=F1=F2
+<RЕА=П20=1=F1
+<RЕА=П21=1=F2
+<FОR=1=1
+<RЕА=П22=1=F1
+<RЕА=П25=1=F2
+<FIN=1=TARGET=F2
+...
+<FIN=1=MIST=F1
+```
+
+prints:
+
+```
+F1А LЕFТ
+F2А RIGНТ
+F1В МISS
+F2В ТАRGЕТ
+FIN2 7/МISS=ТАRGЕТ
+FIN3 7/МISТ=RIGНТ
+```
+
+This confirms that named `<RЕА` uses the directory to read one field without advancing the
+record pointer; `<FОR>` is needed to move to the next record before another named read.
+`<FIN>` scans later records by `G04412/G04304` and leaves the channel positioned at the
+matched record. The subsequent sequential `<RЕА>` copies the whole matched body, including
+the directory bytes; bytes `007,014` render as `7/`.
 
 ### `<RЕА` (`КОМRЕА` 04244) — three addressing modes
 
@@ -1103,15 +1169,16 @@ Relevant `mkp.txt` fragment:
   then advance one record (`G04304`). Landing on the EOF word zeroes `ШКУСЛ` (channel
   closed) and takes the `G03527` EOF reaction: the session's third read left П15 stale
   (`ЧИТ3 1`) because `G04567` then returns error 3.
-- **By record number** (numeric 3rd arg, `G04347` 04347): find the zone via the per-zone
-  first-record index at `'620'/'621'` (built when temp-area zones are flushed, `G03104`;
+- **By record number** (numeric 3rd arg, `RNREA` 04347): find the zone via the per-zone
+  first-record index at `'620'/'621'` (built when temp-area zones are flushed, `ZNFLU`;
   the seek re-points the channel with `ОПВЫВ7`-based zones, so this mode is for the
-  **temp-area channel**), `Э70` it in if needed, then walk headers by L (`G04364`) to an
+  **temp-area channel**), `Э70` it in if needed, then walk headers by L (`RNSCN`) to an
   exact match on the record-number field.
 - **By field name** (symbolic 3rd arg — digits distinguished from letters by the
   `слц МСКЖ; и МСКМАР` parallel-byte trick): look the name up among the `<NАМ` names,
-  then use the header's field count + `FR1x6` byte indexing to extract the field
-  (`G04264`/`G04273`), copying until GOST `025` (`=`).
+  then use the header's field count and body directory bytes to set the starting byte
+  offset. `G04273` fetches bytes from that offset and `КОМRЕА` copies until GOST `025`
+  (`=`). This path does not advance the record pointer; it is an in-place field read.
 
 An extra argument in `АРГ3+27` makes `<RЕА` also store the current record's **number**
 (converted to text, `0o377`-terminated) into that variable.
@@ -1122,7 +1189,7 @@ An extra argument in `АРГ3+27` makes `<RЕА` also store the current record's
 header **at the record start = length by subtraction** (`вчоб ШКУСЛ(М13)`); page-boundary
 overflow flushes the zone (`G04511` 04511: encrypt if keyed + `Э70` write) and retries.
 `СLО`: requires a write-mode channel (the `G04567` guard inverted), stores the EOF word
-`D02337<<24` at the current position, flushes the final zone, decrements `РКЛЮЧ`, zeroes
+`EOFCH<<24` at the current position, flushes the final zone, decrements `РКЛЮЧ`, zeroes
 `ШКУСЛ`.
 
 ### Guards, errors, and the missing type check
