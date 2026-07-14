@@ -708,12 +708,59 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
 - **Channels** (`ОРЕ/RЕА/WRI/FОR/FIN/СЛО`, НК=1..3): per-channel block at `'1557'+20₈·N`
   (`1577/1617/1637`): Э70 descriptor, line counter, file cipher key. Encrypted files are
   de/re-ciphered per zone on channel I/O (`G04552`/`КОМСЛО` use `рзб`/`сбр` with `ИНКЛЮЧ`,
-  same permutation cipher as `ШИФР` §8h). КОТ 3 «канал не открыт» / 4 wrong mode.
+  same permutation cipher as `ШИФР` §8h). КОТ 3 «канал не открыт»; КОТ 4 on wrong mode is
+  the `ДСПКОМ` default М16 (see the `СНЕ` subsection below), not a dedicated code.
 - **Arithmetic** (`АDD/SUВ/МUL/DIV`, adjacent handlers `03777`–`04003`): integers as decimal
   text, shared tail `G04007/G04011` converts result back to text into the МП.
+- **New coverage cases from `dimip.uncov`**:
+  `<UNР=П16/П30=.` over `A.B` exercises the alternate-output path (`04454`) where the
+  unpacked token is copied to the second МП rather than only back into the source МП
+  (`UNРВ А.В А` in `mkp.out`). `<SWI=П10=89=90` exercises the matching-switch path
+  (`04476`, `04477`, `04500`, `04503`, `04504`), executing only the selected next line
+  (`SWI1`) before resuming after the skipped alternatives.
+- **`СОN`** (`КОМСОN 04421`) is an undocumented **substring search**:
+  `<СОN=VАР=TEXT` searches the text value of `VАР` for literal `TEXT`; on success it writes
+  the **1-based** first-match position into `МП01` (`VАР01`), and on failure leaves `МП01`
+  as `НЕТ`. It is not a variable-to-variable compare: `<СОN=П10=П10` searches for the
+  literal text `П10`. Verified cases: `ABABA/BA -> 2`, `ABABAC/ABAC -> 3` (backtracking),
+  `ABABA/Z -> НЕТ`.
 
 New symbols: `КЛЮКОМ` (02173), `СЛДСТР` (02536), `МКПСТР` (02537), `МАКВЫЗ` (02566),
 `КОНМАК` (03673), `АДРМП` (04102). All 28 `КОМxxx` handlers annotated in `dimip.notes`.
+
+### `<СНЕ=МП=Т` — the CHECK command decoded (static; error path traced)
+
+`СНЕ`, undocumented in the manual, is a **type/character-class validator**. Its class
+table is `CHKTAB` — the upper halves of КОИ7-table rows А–Г (`02135`–`02140`), yet another
+dual-use overlay. Each entry packs `[key letter][0o200 − class limit]` into bytes 1–2:
+
+| row | key (byte 1) | byte 2 | limit | class |
+|-----|:--:|:--:|:--:|-------|
+| `02135` (А) | `В` | `170` | 8 | octal digits 0–7 |
+| `02136` (Б) | `I` | `166` | 10 | decimal digits 0–9 |
+| `02137` (В) | `R` | `160` | 16 | digits + numeric punctuation `+ − / , . ⏨` (ГОСТ 000–017) — real-number syntax |
+| `02140` (Г) | `Р` | `176` | 2 | binary digits 0–1 |
+
+`ДСПКОМ` enters **every** handler with `уиа 4(М16)` (`03754`), and `КОМСНЕ` (`04436`)
+uses that as the table length: it scans indexes 3→0 (`слиа -1(М16)`; exhaustion →
+`G02055` «НЕВРН КОНСТ»), matching `АРГ2` against the key byte (`сда 64+40; нтж АРГ2`).
+Row Д (`02141`) at index +4 is **outside** the array. On a match, `РАБ` = bytes 1–2
+(`сда 64+32`), and the loop at `G04443` walks АРГ1's ГОСТ bytes with the
+add-and-test-bit-8 trick: `byte + (0o200 − limit)` sets bit 8 (`и D02436`) iff
+`byte ≥ limit`; the OR-accumulated result (`сда 64+7` → 0 or 1) goes to **КОТ** via the
+`G04334` entry of `УСТКОТ`. So `<СНЕ=Пхх=Т` leaves КОТ = 0 if Пхх consists solely of
+characters legal for type `Т`, 1 otherwise — input validation for `<GЕТ`-obtained values,
+made one-compare-per-char by ГОСТ's layout (digits `000`–`011`, numeric punctuation
+`012`–`017`). The `0o377` terminator can't false-trigger: `0o377 + complement ≥ 0o400`
+keeps bit 8 clear for all four entries.
+
+Dynamically confirmed on the error path only: `mkp.txt`'s `<СНЕ=П10=НЕЧТО` prints
+«НЕВРН КОНСТ» (a multi-char `АРГ2` can never equal a key byte, so М16 runs out). The
+valid-key path is static analysis. Two side notes: byte `170` in row А equals the
+cursor-left code by **coincidence** (it is `0o200−8` here); and since `ДСПКОМ` presets
+`М16 = 4`, the channel «КОТ 4 wrong mode» is really the *inherited default* М16 — any
+handler that error-exits through `УСТКОТ` (`G04333` = `счи М16`) without setting М16
+reports 4.
 
 ### 8j. Low-core map (cells below the 02000 load address)
 
@@ -1048,8 +1095,9 @@ overflow flushes the zone (`G04511` 04511: encrypt if keyed + `Э70` write) and 
 read bit is **clear** (opened with a mode letter), `КОМWRI`/`КОМСLО` if it is **set**.
 Channel errors do **not** abort the macro: `G04333` (04333) records the code in a VАР00
 field (cell 1) and continues — that is why `<ОРЕ=нетфайл=3` is followed by `ПОСЛЕ-ОШ` in
-the live output. Identified codes: 3 = channel not open, 4 = wrong direction, 6 = record
-has no fields.
+the live output. Identified codes: 3 = channel not open, 6 = record has no fields;
+"4 = wrong direction" is really the default `М16 = 4` preset by `ДСПКОМ` for every
+handler (§8i, `СНЕ` subsection) surfacing through the error exit.
 
 **No file-type check anywhere in the path**: `КОМОРЕ` never looks at the catalog type
 nibble (§8c), and `КОМRЕА` unconditionally parses header words. So a channel can only
@@ -1062,8 +1110,9 @@ type-aware piece of `<ОРЕ`.
 1. **Dispatcher decoded (§8a); МКП command table decoded and traced (§8i).** Remaining:
    the `АДРКОМ` per-entry **flag bits** (only the "pre-resolve АРГ1 as МП" flag is
    identified); the second table living in the **low 24 bits** of the `КЛЮКОМ` words
-   (alphabetical A–Z pattern); semantics of the undocumented `СОN`/`СНЕ` handlers; dynamic
-   verification of `LАВ`/`RЕР` loops, `SWI`, `SIТ`. Channels (`ОРЕ`…`СЛО`) are now traced —
+   (alphabetical A–Z pattern); valid-key path of `СНЕ` (`СНЕ` is now decoded —
+   type/class validation via the `CHKTAB` table, §8i; its error path is traced); dynamic
+   verification of `LАВ`/`RЕР` loops and `SIТ`. Channels (`ОРЕ`…`СЛО`) are now traced —
    §8l; still unexercised there: `<RЕА` by number / by field name, `<FIN`, append mode `С`.
 2. **Archive (§8c, §8e):** catalog *creation* now traced (`$КТ`/`ПОЛ` build zone 0 in `06000`
    and write it via `ЗАПКАТ`; volume attached with `Э50 131`). Confirmed fields: `<ДАРХ>` at
