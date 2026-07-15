@@ -74,17 +74,31 @@ pairs per word; see `dimip.lst`):
 | 02017 | `Э53 21` — **declare/clear events** (init the event scale). |
 | 02020 | `Э53 11` — set **event-decoder (дешифратор) address**. |
 | 02021 | `Э53 12` — set **event-scale mask** (`D05771`). |
-| 02022–02024 | Loop: copy 19-word working table into low core (`'1764'`…). |
+| 02022–02024 | Loop: copy 19-word working table `06100..06123` into low core `01741..01764`. |
 | 02025 | `Э50 100` — request **job cipher (шифр)**. |
 | 02026 | `Э71 D02504` — first **terminal I/O**; `нед D05742` status check. |
 | 02030 | `пв G05216` — call setup subroutine. |
-| 02032–02035 | `Э70` disk exchanges (read monitor zones); `пв G03335`. |
+| 02032–02035 | If `ОПКАТ` is nonzero, `Э70 ОПКАТ` reads the saved catalog/monitor setup zone and `пв G03335` formats the selected header word. |
 | 02040 | `Э67 D02400` — install **debug/abort handler**; info word `D02400 = A(ГЛЦИКЛ)` → after any abort, resume the main loop. |
 | 02041–02046 | Final table setup; calls `G02070`, `G03402`, `G02064`. |
 
 In short, init = **fault/abort handling** (Э50 102/103, Э63 3, Э67) + **system info**
 (Э50 100/114) + **asynchronous event mechanism** (Э53 21/11/12) + **load monitor zones**
 (Э70) + **open terminal** (Э71), then fall through into the monitor proper.
+
+`setup.b6` covers the `02032` path by placing the desired catalog state in the `06100`
+copy-down table. The copy loop at `02023` transfers `06100..06102` to `01741..01743`, so
+startup sees:
+
+| source | destination | value | meaning |
+|--------|-------------|-------|---------|
+| `06100` | `ОПКАТ`   | `0010030000550000` | read LUN 55 zone 0 into `БУФЕР` |
+| `06101` | `ОПКАТ+1` | `0000010000000000` | user-table index 1 (`БУФЕР+30`) |
+| `06102` | `ОПКАТ+2` | `0000000100401404` | selected catalog/volume marker `001234` |
+
+With `лен 55(1234)`, this reads volume 1234 through LUN 55, formats the selected user-table
+word `БУФЕР+30` (`КОС`) into `D02334`, loads `ПАДМ` from `БУФЕР+3`, and enters the main loop
+as an already selected library.
 
 ## 5. Extracode (system-call) usage
 
@@ -144,16 +158,14 @@ mangled by text-encoding guesses) and an address/parameter table at `02237`–`0
 `A(ГЛЦИКЛ)`). Together these look like the **directive keyword → handler dispatch table**
 that drives the parser — the prime target for the next pass.
 
-## 8. Directive dispatch & data structures (static, manual-guided)
-
-Not exercised by the trace; identified statically and to be confirmed later:
+## 8. Directive dispatch & data structures
 
 - **Directive dispatcher — decoded** (see §8a below).
-- **Archive / catalog** — per the manual, DIMIP keeps its archive in disk zones with a
-  catalog (идпол/пароль/file map) in the first zone, accessed via `Э70`. Whether the
-  OS-level **`Э63`/`КЛЮЧАР`** area/budget access-control calls (extracodes.txt §5.3.156+)
-  are used for this, or only DIMIP's own format, is **open** — the `КЛЮЧАР` constant is
-  present but the trace shows only `Э63 3`.
+- **Archive / catalog** — DIMIP keeps its archive in disk zones with a catalog
+  (идпол/пароль/file map) in the first zone, accessed via `Э70`. Numeric volumes use the
+  disk attach path (`Э50 131`, §8e). Named `<ТОМ>` values use the OS-level
+  **`Э63`/`КЛЮЧАР`** path in `ДИРКТ`: `05251 сч КЛЮЧАР; Э63 ОПКАТ+4`, with the parsed name
+  in the surrounding `ОПКАТ` cells. This is the ARFA/named-area access path.
 - **Temp area / output buffer** — the editing scratch zones (временная область) and the
   subordinate-task output buffer (буфер вывода) named in the manual; their disk addresses
   appear among the `D057xx` constants and the Э70 info words.
@@ -267,6 +279,60 @@ writes number+text to the terminal via `Э71`.
 **Validated dynamically:** in the `РЕД 2048 *0000` / `Л` trace, `ЧИТСТР` reads the header
 `…0112` at 06000 → L=`012`=10 words, line number = 1 (→ `'1774'`), copies the 10 words to
 `'1746'…'1757'`, advances `М1`, and proceeds to format/emit the line.
+
+### `Л` patterns, `Н`, and the `З` substitute form — traced (`listing.txt`)
+
+The `listing.txt` coverage session exercises the pattern forms of the listing/edit
+directives (429 words on its own; `dimip.uncov` 291→256). Handlers: `ДИРН` `05600`,
+`ДИРЛ` `05603`, `ДИРЗ` `05667`.
+
+- **`Л <Н1> <Н2> <ОБРАЗ>`** works as documented — substring match over the range, `$`
+  suppresses numbers, no matches → «НЕТ ТЕКСТА». (composite.txt's `л 10 50 строчка` never
+  exercised the matcher because its range was empty — the file's lines were numbered 1–5.)
+- **The manual's `?` wildcard does not exist in this build.** A typed `?` arrives as ГОСТ
+  `|` (`0o130`, via the КОИ7 input table), and the `Л`/`Н` match loop (`G05611`) has no
+  wildcard check — `уз?р` is a literal and matches nothing.
+- **`Н <ОБР>`** finds by substring across the whole file; multi-word patterns (with
+  spaces) work; `$Н` lists all matches unnumbered.
+- **`З <N1> <N2> <ОБР> <ЗАМ>` — the substitute form is space-delimited, NOT the manual's
+  `<R><ОБР><R><ЗАМ><R>`.** Mechanism (`05671`–`05710`): the directive dispatcher leaves
+  the byte at the parse position in `КОМАНД`, which `ДИРЗ` uses as the first-char fast
+  reject (`нтж КОМАНД`, `05671`) — with `/узор/…` that byte is the `/` itself, so lines
+  are scanned for `/` and nothing ever matches (trace-verified: `КОМАНД` = `0o14`). The
+  ОБР body is walked via the `АРГ3+24` pointer and **terminates on a ГОСТ space**
+  (`нтж МСК4`, `05675`); the replacement (`АРГ3+25`) is spliced in at `G05701`–`05710`
+  and the line rebuilt through `LNINS` (`05711`). All occurrences in the range are
+  replaced, shorter/longer replacements included (verified: `УЗОР→УЗЕЛ`, `УЗЫР→ТРИ`,
+  `УЗОР→РАЗУЗОР`, two occurrences on one line). No occurrences → «НЕТ ТЕКСТА». A bare
+  `З N1 [N2]` (no pattern, `М12=0`) deletes the range and enters input mode, and a glued
+  `з N1 N2/…/…/` suffix parses as that no-pattern form — beware in scripts.
+- **`≠` paging**: the screen-full pause (`G03530`, `03532`–`03537`) continues on a blank
+  line; a **non-blank** line *aborts the listing and is consumed* — it is not re-executed
+  as a directive.
+
+Still uncovered in this area: `05623`–`05627` — `G05621`'s print path for a line whose
+header carries a nonzero **field count** (bits 25–30, the same field symbolic `<RЕА`
+reads, §8l); no tested flow creates such lines yet.
+
+### `$ПЕЧ` formatted hardcopy output — traced (`bilist.txt`)
+
+`bilist.txt` enters `РЕД`, loads a long manual fragment into the temporary area, and runs
+`$ПЕЧ`. Against the current coverage set, `bilist.cov` contributes 18 unique half-word
+locations, all inside `ДИРПЕЧ`: `04714`–`04721`, `04773`, and `05003`–`05004`.
+
+The output is not a terminal `Л` listing. It is a formatted АЦПУ page: `bilist.out` shows a
+form feed, two page/column numbers, and two text columns. The covered code does the
+corresponding page-layout work:
+
+- `04714`–`04721` emits a deferred/second-column page image. It sets the print-buffer cursor
+  to `070036`, loops over 59 rows, copies 10-word row chunks with `G05007`, pads the
+  `070024` area with blanks, and finally sends the page through `Э64 D02372`.
+- `04773` is the alternate return from the line-filling loop at `G04755`: when the row
+  advance/test at `04772` does not return directly to the caller, it forces `М11=1` before
+  returning, so the formatter continues with the next page/column state.
+- `05003`–`05004` is the `$ПЕЧ` next-page control path reached from `G05000`. It recognizes
+  the `..` control sequence checked against `ТЧКТЧК`, sets `М13=1`, and tests the remainder
+  in `РАБ` with `ржа '13'`.
 
 ## 8c. The catalog / archive on-disk format & the `СФ` directive
 
@@ -450,6 +516,10 @@ Note `0o11064 == 0x1234` — the four typed digits as BCD nibbles. So `<ТОМ>=
 attaches **volume 1234 to LUN 67** (the catalog working LUN). The `..77..` middle field is
 the mandatory `077` marker `Э50 131` checks.
 
+Named `<ТОМ>` values are handled by `ДИРКТ`'s area-access branch: it parses the name into
+the `ОПКАТ` work cells and calls `05251 сч КЛЮЧАР; Э63 ОПКАТ+4`. In practice this is the
+ARFA/named-area path, for example for a name such as `coverage`.
+
 ### `$КТ <ТОМ> <НЗОНА> <ДАРХ>` — create catalog (`ДИРКТ`, 05232)
 1. `ОТКНД` (05216): `Э62 60777` — release any catalog LUN held from a previous `КТ`.
 2. parse `АРГ1..3` = `<ТОМ>=1234`, `<НЗОНА>=0`, `<ДАРХ>=0100` (archive length, **64** zones, octal).
@@ -491,6 +561,20 @@ no password is stored, so the later `ВОЙ` needs none.
 No `Э50 131` and **no `Э70`** in this directive: it works off the in-core catalog left in
 `06000` by the preceding `ПОЛ`, finds `ПРИМЕР`, and prints the banner via `ПЕЧСО`
 (`G05211→02064`). Success = the `*ДИМИП-МКП 05.04.85*` line.
+
+### `Д` / `$Д` — administrator editing of the directive table (`ДИРД`, 05727)
+
+The administrator directive `Д <ДИРЕКТИВА> <ПАДМ>` edits the in-core `ТАБДИР` entry for a
+command, after checking the administrator password in `ПАДМ`. Without `$`, it XORs the
+closed-command bit (`D02371`, `40000000(8)`) in the table entry. `ДИСПАТ` then rejects a
+closed directive by printing `ЗАКР.` instead of dispatching it.
+
+With `$`, the same handler takes a third argument:
+`$Д <ДИРЕКТИВА> <ПАДМ> <НОВКЛЮЧ>`. The branch at `05735` distinguishes this `$` form; the
+covered instructions `05736`-`05737` clear the old 24-bit directive key and OR in
+`АРГ3<<24`. Thus `$Д` renames a directive key while keeping the old handler address and
+flags. The coverage test uses `$д инф адм ззз`, verifies that `ззз` reaches the former
+`ИНФ` handler, then renames it back with `$д ззз адм инф`.
 
 New symbols from this trace: `ПОДКАТ` (`03656`, attach catalog volume + build I/O descriptor),
 `ЗАПКАТ` (`05334`, write catalog back to volume + scratch copy).
@@ -550,6 +634,12 @@ templates**:
 
 The target zone is `template + <ЗОНА>` (e.g. `К 1234 0002` → `0000340000670002`). The write
 happens via `Э70 '1736'` reached from `03133`.
+
+The working raw external write form for `К 1234 *0010` reaches the descriptor
+`03133: Э70 ОПФАЙЛ (=0000340000670010)`. The traced `к 1234 *0010 адм` probe reaches
+`G05722`, compares `АРГ3` with `ПАДМ`, reloads the saved `АРГ2`, and jumps into `G03621`.
+With `*0010` in `АРГ2`, the descriptor carries read/type bits; the trace rolls through
+`04642: Э70 ОПЗОН` across successive zones and exits via `ОШ.В ИНФ.СЛ.ЭКСТ`.
 
 ### The У vs I fork (gated by the `*` type flag)
 `ПОДКАТ` (`03665`–`03671`) tests the `*` type flag — parsed into the **ПРЕФ area, cell
@@ -802,7 +892,7 @@ render every small literal operand — `слиа 1(М5)`, `уиа 4(М16)`, … 
 | `1724` | `ОПВЫВ7` | (`ОПВЫВ+7`) placeholder — thin evidence: `ОТКНД` scratch around the `Э62 60` (data-set LUN 60) release. |
 | `1725` | `ШКПЗ` | (`ОПВЫВ+8`) scale of subtask shifrs/channels — `ПЗНОВ`: `сч ШКПЗ / Э62 61 (запрос шифров ПЗ) / зп ШКПЗ`; `ДИРПП` toggles a channel bit (`нтж ШКПЗ`). Was `ОПВЫВ+8`. |
 | `1726` | `ОПВЫВ9` | (`ОПВЫВ+9`) placeholder — thin evidence: sparse ПЗ-context scratch (init-zeroed; `G03610 сч`). |
-| `1727` | `ПАДМ` | (`ОПВЫВ+10`) administrator password — loaded from the catalog at init (`2036: сч БУФЕР+3`); `ДИРД`/`ПОЛ` compare `АРГ2` against it (`нтж ПАДМ` at `05727`), mismatch → «ЧУЖОЙ КЛЮЧ». Was `ОПВЫВ+10`. |
+| `1727` | `ПАДМ` | (`ОПВЫВ+10`) administrator password — loaded from the catalog at init (`2036: сч БУФЕР+3`); `ДИРД` compares `АРГ2` against it (`нтж ПАДМ` at `05727`) and `ПОЛ` uses it for administrator authorization. `G05722` compares `АРГ3` with `ПАДМ`; in the traced `К 1234 *0010 адм` probe the subsequent `АРГ2`-derived descriptor rolls through `Э70 ОПЗОН` until `ОШ.В ИНФ.СЛ.ЭКСТ`. Was `ОПВЫВ+10`. |
 | `1730` | `ГОТБУФ` | (`ОПВЫВ+11`) ПЗ output-buffer-ready flags — `сч ГОТБУФ`, r.4 «буфер вывода готов» → `G03530`. Was `ОПВЫВ+11`. |
 | `1731` | `ОПВВ12` | (`ОПВЫВ+12`) placeholder — tentative: a field of the `Э50 114` (date + machine-number) result (`и D05756`), feeds `ДАТА` and is OR'd into headers (`G05656/G05715`). Not firmed up (date component vs. machine number). |
 | `1732` | `ОПВВ13` | (`ОПВЫВ+13`) placeholder — thin evidence: set once at init to `'F'` (`ENDMRK = 0100`) and apparently never read. |
@@ -1080,20 +1170,14 @@ Relevant `mkp.txt` fragment:
   (consumed only by the symbolic `<RЕА` path, `G04264`; 0 → error 6).
 - **Field directory**: for a fielded БД record, the first `field_count` bytes of the body
   are a directory. Directory byte `i` stores **one less than the absolute byte index** of
-  field `i`'s first text byte, counted from the start of the record header. This off-by-one
-  is not a guess: `G04264` finds the field name, checks `(header >> 24) & 077`, sets up
-  `М16=6`, then falls into `G04273`; `G04273` increments `М5` before byte fetch, so a
-  directory byte `007` points at byte index `010`. Thus a two-field body can start
+  field `i`'s first text byte, counted from the start of the record header. `G04264`
+  finds the field name, checks `(header >> 24) & 077`, sets up `М16=6`, then falls into
+  `G04273`; `G04273` increments `М5` before byte fetch, so a directory byte `007` points
+  at byte index `010`. Thus a two-field body can start
   `[007,014,"LEFT=RIGHT",0377...]`, where field 1 starts at byte 010 and field 2 at
-  byte 015. Plain `<WRI>` never builds this directory, so named `<RЕА`/`<FIN` over
-  `<WRI>` output fail with field-count zero even if the text contains `=`.
-  This does not make MKP formation impossible: a macro can still build the fielded
-  body explicitly by splitting a source value with `<UNР>` on the chosen separator,
-  measuring the field lengths with `<SIZ>` where that directive exists, computing the
-  directory byte values, prepending those bytes to the text body, and then passing the
-  already-formed record body to `<WRI>`. The local decoded `КЛЮКОМ` table does not contain
-  `SIZ`, so this is a construction route for an environment that provides the manual's
-  `<SIZ>` rather than evidence that plain `<WRI>` has a hidden directory builder.
+  byte 015. `<WRI>` writes an already-formed body verbatim; a macro can form fielded
+  records by splitting text (for example with `<UNР>`), computing/prepending directory
+  bytes, and then passing that body to `<WRI>`.
 - **Body**: ГОСТ 10859 text, one char per 8-bit byte, 6 chars/word, terminated by a
   `0o377` byte. Both
   `КОМWRI`'s and `КОМRЕА`'s copy loops delimit the last word with **`МСКМАР`** (`02445` =
@@ -1101,7 +1185,7 @@ Relevant `mkp.txt` fragment:
   general byte-fetcher `G04116` (04116) flags `byte == 255` (`слиа -255`) as end-of-text.
   The sequential `<RЕА=П15=1` path copies the full record body until this terminator and
   then advances by the header length.
-- **Field separator**: the symbolic-field path does use **GOST code `025`**, i.e. `=`.
+- **Field separator**: the symbolic-field path uses **GOST code `025`**, i.e. `=`.
   After `<RЕА=VАР=НК=ПОЛЕ` finds the field index (`G04264`), `G04273`/`G04116` fetches
   successive bytes. `G04116` leaves `М11 = byte - 0377`; the copy loop then executes
   `слиа '352'(М11)`, yielding `byte - 025`. Nonzero bytes go through `G04167`; byte
@@ -1114,7 +1198,7 @@ Relevant `mkp.txt` fragment:
   An **all-zero word** means "zone exhausted": `G04552` pages in the file's next zone and
   the scan continues. Records do not span zones.
 
-**Dynamic BD proof (`bd.setup` + `bd.txt`).** The coverage test now creates a real catalog
+**Dynamic BD proof (`bd.setup` + `bd.txt`).** The coverage test creates a real catalog
 entry `ФД`, then overwrites its first data zone with three hand-formed fielded records:
 
 ```
@@ -1192,7 +1276,7 @@ overflow flushes the zone (`G04511` 04511: encrypt if keyed + `Э70` write) and 
 `EOFCH<<24` at the current position, flushes the final zone, decrements `РКЛЮЧ`, zeroes
 `ШКУСЛ`.
 
-### Guards, errors, and the missing type check
+### Guards, errors, and type handling
 
 `G04567` (04567) resolves `к` → `М13/М12` and returns `CW & Е40`: `КОМRЕА` errors if the
 read bit is **clear** (opened with a mode letter), `КОМWRI`/`КОМСLО` if it is **set**.
@@ -1202,7 +1286,7 @@ the live output. Identified codes: 3 = channel not open, 6 = record has no field
 "4 = wrong direction" is really the default `М16 = 4` preset by `ДСПКОМ` for every
 handler (§8i, `СНЕ` subsection) surfacing through the error exit.
 
-**No file-type check anywhere in the path**: `КОМОРЕ` never looks at the catalog type
+`КОМОРЕ` does not check the catalog type
 nibble (§8c), and `КОМRЕА` unconditionally parses header words. So a channel can only
 meaningfully read **У-format** files (or the temp area); an `I` file (flat KOI-7 bytes +
 `0x0a`, §8g) would have its first word misread as a header. The `Т=` info form is the only
@@ -1210,32 +1294,22 @@ type-aware piece of `<ОРЕ`.
 
 ## 9. Open questions / next-pass targets
 
-1. **Dispatcher decoded (§8a); МКП command table decoded and traced (§8i).** Remaining:
-   the `АДРКОМ` per-entry **flag bits** (only the "pre-resolve АРГ1 as МП" flag is
-   identified); the second table living in the **low 24 bits** of the `КЛЮКОМ` words
-   (alphabetical A–Z pattern); valid-key path of `СНЕ` (`СНЕ` is now decoded —
-   type/class validation via the `CHKTAB` table, §8i; its error path is traced); dynamic
-   verification of `LАВ`/`RЕР` loops and `SIТ`. Channels (`ОРЕ`…`СЛО`) are now traced —
-   §8l; still unexercised there: `<RЕА` by number / by field name, `<FIN`, append mode `С`.
-2. **Archive (§8c, §8e):** catalog *creation* now traced (`$КТ`/`ПОЛ` build zone 0 in `06000`
-   and write it via `ЗАПКАТ`; volume attached with `Э50 131`). Confirmed fields: `<ДАРХ>` at
-   word `0002`, free-tract **bitmap** at `0005`–`0006`, `*ДИМИП` signature + идпол name at
-   `0035`/`0036`; the file-entry **type field** is now fully decoded, including why type `Б`
-   never appears (§8c). Remaining: the rest of the catalog **control words** (0–5), the exact
-   **bitmap** encoding (tract↔bit), the full **идпол record** layout (passwords `<КЛЮЧ>`/`<ПАДМ>`,
-   directory pointers — exercise `ПОЛ <ИДПОЛ> <КЛЮЧ> <ПАДМ>` with full params), and whether the
-   OS `КЛЮЧАР`/`Э63` access control is used at all.
-3. **Low-core variables:** the established ones are now named — see the map in §8j.
-   Remaining unnamed: the М17-workspace `1411`–`1416`, the `АРГ3+21..+28` argument/flag
-   cells, `ПРЕФ+к` flag cells, the SIТ situation table near `'1662'`.
-4. ~~Verify the text encoding of the keyword table~~ — done, see `КЛЮКОМ` (§8i).
-5. **Editor internals (§8b):** meaning of the line-header **auxiliary field** (bits 25–48
-   beyond the field count identified in §8l); ~~the exact character packing~~ — settled,
-   ГОСТ 10859 one char per byte, 6 chars/word (§8b/§8g/§8l); and the временная-область
-   **zone↔лист paging** that `РЕД` performs (the `Э70` window management).
-7. **Subtask events (§8k):** decoder and manual controls decoded; **bit 11 → `ПЗНОВ` confirmed
-   live** (`ф тест` under `dispak --subtasks`, subtask `#041`) — no dispak event-bit bug.
-   Remaining: exercise `ПЗСТОП` (bit 9) by stopping a subtask from the main task (`ПП`/`ЗП`
-   with the subtask still in a channel), and observe the `ФЗПЗ`/`КЗПЗ` macro invocation during `<GET`.
-6. Eventually: hand-edit `dimip.lst` into a `dimip.be` source and round-trip it through
-   `asm.pl` + `verify.pl` (re-dispak workflow) to a byte-exact rebuild.
+1. **МКП dispatcher and command table (§8a, §8i).** Remaining: the rest of the `АДРКОМ`
+   per-entry flag bits; the low 24-bit table embedded in the `КЛЮКОМ` words; the valid-key
+   path of `СНЕ`; dynamic verification of `LАВ`/`RЕР` loops, `SIТ`, and channel append mode
+   `С`.
+2. **Archive/catalog format (§8c, §8e).** Catalog creation, file-entry types, the basic
+   bitmap/signature fields, and the named-area `КЛЮЧАР`/`Э63` path are traced. Remaining:
+   the rest of catalog control words 0–5, exact tract↔bit mapping, and the full идпол
+   record layout including passwords and directory pointers.
+3. **Low-core and scratch variables (§8j).** Remaining unnamed or thinly identified:
+   М17-workspace `1411`–`1416`, `АРГ3+21..+28`, `ПРЕФ+к`, and the `SIТ` situation table near
+   `'1662'`.
+4. **Editor/temp-area internals (§8b, §8l).** Remaining: the line-header auxiliary bits
+   beyond length/record-number/field-count, the still-uncovered field-count print path
+   `05623`–`05627`, and the temp-area zone/list paging performed by `РЕД`.
+5. **Subtask event layer (§8k).** Remaining: exercise `ПЗСТОП` (bit 9) via `ПП`/`ЗП` while
+   the subtask is still channel-associated, and observe `ФЗПЗ`/`КЗПЗ` macro invocation
+   during `<GET`.
+6. **Source reconstruction.** Continue replacing anonymous labels/data names in
+   `re-dimip.be`, assemble with `asm.pl`, and compare against `dimip.bin`.
