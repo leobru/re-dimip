@@ -1,0 +1,128 @@
+# Аннотации к листингу dimip2.bin.  Формат: см. annotate.py
+# <адрес> > текст    — комментарий над строкой
+# <адрес>[r] ; текст — комментарий справа от левой/правой команды слова
+
+# ---- init / common monitor skeleton ----
+02000 > DIMIP2/manual build entry. 2048-word image loaded at 02000 by dimip2248.b6.
+02000 > Structurally the same monitor as dimip.bin, but relaid out and with a
+02000 > manual-like MKP command set: SIZ/UNТ present; СОN/СНЕ/LАВ absent.
+02001r ; first external-memory exchange through the bootstrap descriptor
+02004r ; Э50 103: install avost reaction address
+02005r ; Э50 102: avost setup/count
+02006r ; Э63: reserve time for avost handling
+02007r ; Э50 114: volume/terminal setup
+02015r ; Э53 21: event setup
+02016r ; Э53 11: event decoder address
+02017r ; Э53 12: event mask
+02020 > Copy monitor/catalog setup words into the working area.
+02023r ; Э71 using D02047; same early terminal/event path shape as dimip.bin
+02031 > Main startup proceeds into the command loop after printing/formatting setup text.
+02067 > Common message printer: called by many inline text/data blocks above 02032.
+02073 > Text block walker/formatter entry used by startup and diagnostics.
+
+# ---- MKP and DIMIP command tables ----
+02201 > КЛЮЧКОМ: MKP command key table. Entries are keyed by the high 3 GOST bytes.
+02201 > dimip2 set: LЕТ SТ= NАМ SUВ INF МUL МЕХ '   ' DIV RЕР АDD SIТ СLО ВRI
+02201 >             SWI МЕS WRI GЕТ FIN SIZ UNР FОR ОРЕ RЕА UNТ IGЕ ЕLS IЕQ.
+02201 > Compared with dimip.bin: adds SIZ and UNТ; drops СОN, СНЕ, LАВ.
+02216 ; ВRI key: placeholder/no-op command, dispatches to the pass/comment handler
+02224 ; SIZ key: manual command, count bytes in one variable into another
+02231 ; UNТ key: manual loop terminator/update command
+02235 ; ЕND-looking table tail; no named ЕND handler in dimip2.sym
+
+02245 > АДРКОМ: parallel MKP handler-address table for КЛЮЧКОМ.
+02245 > Marked J in dimip2.sym so packed handler addresses seed disassembly.
+02245 ; LЕТ -> КОМLЕТ
+02246 ; SТ= -> КОМSТ
+02247 ; NАМ -> КОМNАМ
+02250 ; SUВ -> КОМSUВ
+02251 ; INF -> КОМINF
+02252 ; МUL -> КОММUL
+02253 ; МЕХ -> КОММЕХ
+02254 ; blank comment key -> КОМПСТ
+02255 ; DIV -> КОМDIV
+02256 ; RЕР -> КОМRЕР
+02257 ; АDD -> КОМАDD
+02260 ; SIТ -> КОМSIТ
+02261 ; СLО -> КОМСLО
+02262 ; ВRI -> КОМПСТ, same pass/no-op handler as comment
+02263 ; SWI -> КОМSWI
+02264 ; МЕS -> КОММЕS
+02265 ; WRI -> КОМWRI
+02266 ; GЕТ -> КОМGЕТ
+02267 ; FIN -> КОМFIN
+02270 ; SIZ -> КОМSIZ
+02271 ; UNР -> КОМUNР
+02272 ; FОR -> КОМFОR
+02273 ; ОРЕ -> КОМОРЕ
+02274 ; RЕА -> КОМRЕА
+02275 ; UNТ -> КОМUNТ
+02276 ; IGЕ -> КОМIGЕ
+02277 ; ЕLS -> КОМЕLS
+02300 ; IЕQ -> КОМIЕQ
+
+02302 > ДИМИП directive table follows the MKP handler table; addresses are packed in
+02302 > the opposite half from АДРКОМ. This includes Л/В/Н/И/З/С/П/К/ИНФ/ЗАМ/...
+
+# ---- command scanner / dispatch ----
+02514 > КОМSIТ: MKP situation handler registration for a command and nonzero KOT.
+02525 > КОМПСТ: central pass/continue path. Used by blank-comment key and by ВRI.
+02525 > Many command handlers return here after setting KOT / updating parser state.
+02534 > Common next-line / continue path after MKP command handling.
+02625 > Shared variable/string writeback tail used by LET, GET, READ, SIZE and others.
+
+# ---- parsing and variable helpers ----
+03026 > Parse numeric/index argument component.
+03051 > Fetch next MKP argument byte/string component; returns through caller register.
+03263 > GET/default prompt support: format prompt text before terminal input.
+03722 > Store numeric result as decimal text into the target MKP variable.
+04017 > Resolve MKP variable operand from parsed argument.
+04027 > Iterate over bytes of an MKP variable/text value.
+04036 > Fetch byte by position from text/variable storage.
+
+# ---- arithmetic / assignment ----
+03710 > КОМАDD: add integer text to target variable.
+03711 > КОМSUВ: subtract integer text from target variable.
+03712 > КОММUL: multiply integer text.
+03714 > КОМDIV: divide integer text.
+03720 > Common arithmetic tail: normalize sign and convert result back to decimal text.
+04042 > КОМGЕТ: accepted form <GЕТ=V=prompt-=default=>; batch input reads next stdin line.
+04062 > КОМLЕТ: <LЕТ=V=text>, indexed forms, and variable-byte copy forms.
+
+# ---- output, conditions, loops ----
+04107 > КОММЕS: output message; /Р path goes through printer/output channel.
+04122 > КОМUNТ: manual loop terminator. With <RЕР=V=start> ... <UNТ=V=end[=step]>
+04122 > it updates/checks the loop variable and either repeats body or falls through.
+04141 > КОМIЕQ: dimip2/manual pattern matcher. Use manual pattern forms such as 1'А';
+04141 > a bare literal that works in dimip.bin can be syntax-error here.
+04145 > КОМIGЕ: numeric >= condition, shares condition-stack machinery with IЕQ.
+04147 > КОМЕLS: invert current conditional branch state.
+04152 > Condition pop/close path corresponding to the ЕND table tail.
+
+# ---- channel / record commands ----
+03734 > КОМОРЕ: open file/channel or query file metadata when channel argument is absent.
+04154 > КОМRЕА: read record. Covered forms include <RЕА=V=НК>, <RЕА=V/V2=НК>,
+04154 > <RЕА=V=НК=record-number>, field read, and execute-record forms in related tests.
+04173 > Field/directory helper for symbolic RЕА/FIN access.
+04200 > Compare/fetch bytes of a selected field or record body.
+04205 > КОМFОR: advance channel by N records.
+04241 > КОМNАМ: assign field names for a channel; does not create field directory itself.
+04303 > КОМFIN: find a record by field value; optional =М allows partial match.
+04327 > КОМSIZ: manual command <SIZ=V1=V2>, counts bytes in V1 and writes count to V2.
+04540 > КОМСLО: close channel or current temporary/editor area.
+04562 > КОМWRI: write already prepared record body; does not synthesize named fields.
+04631 > Channel-open check/setup shared by RЕА/FIN/FОR/WRI/NАМ.
+04653 > КОМUNР: split variable by separator; V/V2 form keeps source and writes fields to V2...
+
+# ---- context and macro calls ----
+03600 > КОММЕХ: <МЕХ> returns from current macro; argument form stops all MKP work.
+03616 > Loop/body rewind helper used by UNТ when repetition is needed.
+04060 > КОМRЕР: manual loop opener. <RЕР=V=start> initializes V and records loop point.
+04636 > КОМSТ: save MKP variable range in current macro context; restored on macro exit.
+04705 > Macro-context restore/return path.
+
+# ---- coverage/disassembly notes ----
+05034 > Covered by dimip2 sessions in the file/editing area; still structurally matched
+05034 > to dimip.bin rather than fully named here.
+05450 > WRI support path reached from КОМWRI after channel setup.
+

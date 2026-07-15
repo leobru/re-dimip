@@ -1,16 +1,22 @@
 COVERAGE_TXT = composite macro mkp bd fact context seek listing admin bilist convert
 COVERAGE_OTHER = subtask setup
 COVERAGE_TARGETS = $(COVERAGE_TXT:%=%.cov) $(COVERAGE_OTHER:%=%.cov)
-COVERAGE2_TXT = composite2
+COVERAGE2_TXT = composite2 mkp-manual
 COVERAGE2_TARGETS = $(COVERAGE2_TXT:%=%.cov)
 
 dimip.lst: dimip.bin dimip.notes dimip.sym
 	./disasm.sh > $@
 
+dimip2.lst: dimip2.bin dimip2.notes dimip2.sym trace2
+	./disasm2.sh > $@
+
+trace2: combined2.cov
+	awk '$$2 != "--" { print $$1 " coverage" }' $< > $@
+
 %.cov: %.txt coverage.sh dimip.b6
 	./coverage.sh $<
 
-composite2.cov: composite2.txt coverage.sh dimip2248.b6
+$(COVERAGE2_TARGETS): %.cov: %.txt coverage.sh dimip2248.b6
 	./coverage.sh $< dimip2248.b6 -x
 
 bd.cov: bd.setup
