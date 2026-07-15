@@ -317,8 +317,9 @@ reads, §8l); no tested flow creates such lines yet.
 ### `$ПЕЧ` formatted hardcopy output — traced (`bilist.txt`)
 
 `bilist.txt` enters `РЕД`, loads a long manual fragment into the temporary area, and runs
-`$ПЕЧ`. Against the current coverage set, `bilist.cov` contributes 18 unique half-word
-locations, all inside `ДИРПЕЧ`: `04714`–`04721`, `04773`, and `05003`–`05004`.
+`$ПЕЧ`. Against the current coverage set, `bilist.cov` contributes 31 unique half-word
+locations inside `ДИРПЕЧ`: `04714`–`04721`, the residual-line countdown at
+`04747`/`04750`, the marked-byte path `04761`–`04763`, `04773`, and `05003`–`05006`.
 
 The output is not a terminal `Л` listing. It is a formatted АЦПУ page: `bilist.out` shows a
 form feed, two page/column numbers, and two text columns. The covered code does the
@@ -330,9 +331,13 @@ corresponding page-layout work:
 - `04773` is the alternate return from the line-filling loop at `G04755`: when the row
   advance/test at `04772` does not return directly to the caller, it forces `М11=1` before
   returning, so the formatter continues with the next page/column state.
+- `04761`–`04763` is the special line-fill path for a packed byte that trips
+  `(word + D05746) & МСКМАР`; `D05746` is bytewise `003`, so an input `\\` converted to
+  GOST `0175` is enough to set the `0200` marker bit and exercise this path.
 - `05003`–`05004` is the `$ПЕЧ` next-page control path reached from `G05000`. It recognizes
   the `..` control sequence checked against `ТЧКТЧК`, sets `М13=1`, and tests the remainder
-  in `РАБ` with `ржа '13'`.
+  in `РАБ` with `ржа '13'`. A `..NN` line continues through `05005`–`05006`, shifts the
+  numeric remainder, sets the return state for `G04747`, and parses the count with `G03011`.
 
 ## 8c. The catalog / archive on-disk format & the `СФ` directive
 
