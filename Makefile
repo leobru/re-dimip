@@ -1,8 +1,9 @@
 COVERAGE_TXT = composite macro mkp bd fact context seek listing admin bilist convert
 COVERAGE_OTHER = subtask setup
 COVERAGE_TARGETS = $(COVERAGE_TXT:%=%.cov) $(COVERAGE_OTHER:%=%.cov)
-COVERAGE2_TXT = composite2 mkp-manual
-COVERAGE2_TARGETS = $(COVERAGE2_TXT:%=%.cov)
+COVERAGE2_TXT = composite2 mkp-manual bd2 macro2 bilist2
+COVERAGE2_TXT_TARGETS = $(COVERAGE2_TXT:%=%.cov)
+COVERAGE2_TARGETS = $(COVERAGE2_TXT_TARGETS)
 
 dimip.lst: dimip.bin dimip.notes dimip.sym
 	./disasm.sh > $@
@@ -16,7 +17,7 @@ trace2: combined2.cov
 %.cov: %.txt coverage.sh dimip.b6
 	./coverage.sh $<
 
-$(COVERAGE2_TARGETS): %.cov: %.txt coverage.sh dimip2248.b6
+$(COVERAGE2_TXT_TARGETS): %.cov: %.txt coverage.sh dimip2248.b6
 	./coverage.sh $< dimip2248.b6 -x
 
 bd.cov: bd.setup
@@ -24,8 +25,11 @@ bd.cov: bd.setup
 subtask.cov: subtask.exp
 	./subtask.exp
 
+subtask2.cov: subtask2.exp dimip2248.b6
+	./subtask2.exp > subtask2.out 2> subtask2.err
+
 setup.cov: setup.b6
-	timeout 10 dispak -p --coverage=$@ setup.b6 > setup.out
+	dispak -p --coverage=$@ setup.b6 < /dev/null > setup.out
 
 combined.cov: $(COVERAGE_TARGETS)
 	./combine_coverage.py $^ | grep '^0[2-5]...:' > $@

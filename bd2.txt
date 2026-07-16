@@ -1,0 +1,37 @@
+a
+$кт 1234 0000 100
+пол мкп мкп адм
+кт 1234 0000 мкп мкп
+сф бд 3 у
+сф мкр 3 у
+сф
+ред мкр
+<ОРЕ=бд=1=w
+<NAM=1=field
+<LET=V10=qwerty_uiop
+<LET=V20=qwerty,uiop
+<LET=V30=qwerty=uiop
+<WRI=V10=1=c
+<WRI=V20=1=c
+<WRI=V30=1=c
+<СLО=1
+<ОРЕ=бд=1
+<NAM=1=field
+<REA=V40=1=field
+<MES=READ1 %V40
+<FOR=1=1
+<REA=V41=1=field
+<MES=READ2 %V41
+<FOR=1=1
+<REA=V42=1=field
+<MES=READ3 %V42
+<СLО=1
+<MEX
+
+к
+мкр
+
+ред бд
+
+л
+вый
