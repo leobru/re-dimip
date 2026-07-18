@@ -1,0 +1,20 @@
+$кт 1234 0 10
+пол макро
+вой макро
+ред
+<mcr=doit
+<mes=before sit
+<sit=clo=say=3
+<mes=after sit
+<clo=1
+<mes=after clo
+<men
+<mcr=say
+<mes=here you go
+<men
+
+л
+$k
+сф
+doit
+вый
