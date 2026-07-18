@@ -5,7 +5,9 @@ extracodes.txt
 
 # Various generated files
 *.cov
+*.trace
 *.uncov
+*.err
 *.out
 *.raw
 *.lst

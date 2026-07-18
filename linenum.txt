@@ -1,0 +1,38 @@
+$кт 1234 0000 200
+пол lnum ключ адм
+вой lnum ключ
+сф lnum 100 у
+ред
+
+10 x
+к lnum
+с lnum 10 10 10
+к lnum
+с lnum 10 20 10
+к lnum
+с lnum 10 40 10
+к lnum
+с lnum 10 80 10
+к lnum
+с lnum 10 160 10
+к lnum
+с lnum 10 320 10
+к lnum
+с lnum 10 640 10
+к lnum
+с lnum 10 1280 10
+к lnum
+с lnum 10 2560 10
+к lnum
+с lnum 10 5120 10
+к lnum
+с lnum 10 10240 10
+к lnum
+с lnum 10 20480 10
+к lnum
+с lnum 10 40960 10
+к lnum
+инф 
+с lnum 10 81920 10
+к lnum
+вый

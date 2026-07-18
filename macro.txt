@@ -12,12 +12,12 @@ $кт 1234 0 10
 <mes=четыре пять
 <men
 <mcr=four
-<mes=вышел зайчик погулять
+<mes=%v01 зайчик %v02
 <men
 
 $k
 сф
-four
+four вышел=погулять
 three
 two
 one

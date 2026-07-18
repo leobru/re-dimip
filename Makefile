@@ -1,7 +1,7 @@
-COVERAGE_TXT = composite macro mkp bd fact context seek listing admin bilist convert
+COVERAGE_TXT = composite macro mkp bd fact context seek listing admin bilist convert grow linenum sit
 COVERAGE_OTHER = subtask setup
 COVERAGE_TARGETS = $(COVERAGE_TXT:%=%.cov) $(COVERAGE_OTHER:%=%.cov)
-COVERAGE2_TXT = composite2 mkp-manual bd2 macro2 bilist2
+COVERAGE2_TXT = composite2 mkp-manual bd2 macro2 bilist2 loop grow2 linenum2
 COVERAGE2_TXT_TARGETS = $(COVERAGE2_TXT:%=%.cov)
 COVERAGE2_TARGETS = $(COVERAGE2_TXT_TARGETS)
 
@@ -57,6 +57,12 @@ re-dimip.dump:
 
 check: dimip.bin re-dimip.bin
 	cmp $^ && echo SUCCESS
+
+unique: $(COVERAGE_TARGETS)
+	./unique_coverage.py $^
+
+unique2: $(COVERAGE2_TARGETS)
+	./unique_coverage.py $^
 
 clean:
 	rm -f *.lst *.cov *.uncov

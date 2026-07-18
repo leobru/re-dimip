@@ -280,6 +280,27 @@ writes number+text to the terminal via `Э71`.
 `…0112` at 06000 → L=`012`=10 words, line number = 1 (→ `'1774'`), copies the 10 words to
 `'1746'…'1757'`, advances `М1`, and proceeds to format/emit the line.
 
+**Known DIMIP bug: `Л` can loop forever after over-99999 renumbering.** Minimal trigger
+(`loop.txt`): enter three lines, run `П 99999`, then `Л`. The renumbered lines become
+`99999`, `199998`, `299997` (the terminal output shows the first as `99999 ОДИН` and the
+second distorted as `99998 ДВА`), and the listing never returns. A short trace
+(`timeout 0.01 dispak -t -t -p dimip.b6 < loop.txt > loop.out 2> loop.trace`) catches the
+loop at:
+
+```
+05624 -> СИМВ 03041..03047 -> 05625
+05625 -> G04167 -> 03052..03060 -> 05626
+05626 -> 05624
+```
+
+The stuck path is the `G05621` special print path. It extracts a nonzero 6-bit field from
+`СТРОКА` (`05621`–`05623`), uses it as a byte index `М5`, then repeatedly calls `СИМВ` and
+`G04167` while `М11 != 0` (`05626: пино G05624(М11)`). With a six-digit line number, the
+five-digit number field formatting is corrupted; `М5` points into/through the current-line
+buffer incorrectly, and the formatter scans memory waiting for a byte condition that is not
+encountered. The loop is therefore in DIMIP's pre-output line-image construction, not in
+terminal output or `dispak`.
+
 ### `Л` patterns, `Н`, and the `З` substitute form — traced (`listing.txt`)
 
 The `listing.txt` coverage session exercises the pattern forms of the listing/edit
@@ -789,6 +810,11 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
   `СКНКОМ` → `ДСПКОМ` → handler; unknown `<ИМЯМ` (with М12=0) → `МАКВЫЗ 02566` = nested
   macro call. Handlers return via `СЛДСТР 02536` (also the comment handler); end of file /
   `<МЕХ` → `КОНМАК 03673`: decrement macro-call level (byte of cell 1), level 0 → `ГЛЦИКЛ`.
+- **`SIТ` dispatch**: `<SIТ=DIR=MACR=CODE` writes a handler descriptor into the table at
+  `'1662'` parallel to `КЛЮКОМ`. On a matching nonzero КОТ, `УСТКОТ` (`G04333`..`G04346`)
+  invokes `МАКВЫЗ` for that handler directly, then returns to the caller's next macro line.
+  Verified by `sit.txt`: `<SIТ=СLО=SАУ=3` catches `<СLО=1` and prints `SАУ` before the
+  following `<МЕS`.
 - **Macro variables**: `МПn` = 4 words at cells `4n+1..4n+4` (`VАР00`=1–4, `МП10`=51₈–54₈,
   verified); `АДРМП 04102` resolves n→М4. Text УПП, `0377` terminator. КОТ = byte of
   `VАР00` word 1 (`УСТКОТ G04333`).
@@ -1301,8 +1327,7 @@ type-aware piece of `<ОРЕ`.
 
 1. **МКП dispatcher and command table (§8a, §8i).** Remaining: the rest of the `АДРКОМ`
    per-entry flag bits; the low 24-bit table embedded in the `КЛЮКОМ` words; the valid-key
-   path of `СНЕ`; dynamic verification of `LАВ`/`RЕР` loops, `SIТ`, and channel append mode
-   `С`.
+   path of `СНЕ`; dynamic verification of `LАВ`/`RЕР` loops and channel append mode `С`.
 2. **Archive/catalog format (§8c, §8e).** Catalog creation, file-entry types, the basic
    bitmap/signature fields, and the named-area `КЛЮЧАР`/`Э63` path are traced. Remaining:
    the rest of catalog control words 0–5, exact tract↔bit mapping, and the full идпол

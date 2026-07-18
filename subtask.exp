@@ -27,8 +27,17 @@ send "кт\r";
 send "ред\r";
 send "ШИФР 419900ЗС5^\r";
 send "ГЛА 419999^\r";
+send "АЦПУ 128^\r";
 send "ЕЕВ1А3\r";
 send "*NАМЕ SUBTASK\r";
+send "      program main\r";
+send "      do 10 i = 1,1000\r";
+send "      print 1,i\r";
+send "  10  continue\r";
+send "   1  format(1x'quite a long prefix',i10,' quite a long suffix')\r";
+send "      call exit\r";
+send "      end\r";
+send "*EXECUTE\r";
 send "*ЕND FILЕ\r\r";
 send "ф\r"
 
@@ -53,6 +62,10 @@ sleep 0.5
 
 send "б $chan 1 80\r"; sleep 1
 send "л\r";        sleep 1
+# set n 0
+# while {$n < 2200/14} {
+# send "\r"; sleep 0.01; incr n
+# }
 send "вый\r"
 set timeout 5
 expect eof
