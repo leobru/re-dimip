@@ -1,7 +1,7 @@
 COVERAGE_TXT = composite macro mkp bd fact context seek listing admin bilist convert grow linenum sit divzero
 COVERAGE_OTHER = subtask setup
 COVERAGE_TARGETS = $(COVERAGE_TXT:%=%.cov) $(COVERAGE_OTHER:%=%.cov)
-COVERAGE2_TXT = composite2 mkp-manual bd2 macro2 bilist2 loop grow2 linenum2 listing2 convert2 context2 seek2 admin2 divzero2 sit2
+COVERAGE2_TXT = composite2 mkp-manual bd2 macro2 bilist2 loop grow2 linenum2 listing2 convert2 context2 seek2 admin2 divzero2 sit2 pattern2
 COVERAGE2_TXT_TARGETS = $(COVERAGE2_TXT:%=%.cov)
 COVERAGE2_OTHER = subtask2
 COVERAGE2_TARGETS = $(COVERAGE2_TXT_TARGETS) $(COVERAGE2_OTHER:%=%.cov)

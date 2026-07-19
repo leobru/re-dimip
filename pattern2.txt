@@ -1,0 +1,101 @@
+$кт 1234 0000 100
+пол кос кос адм
+вой кос кос
+сф птн2 3 у
+ред птн2
+<   dimip2 IEQ pattern edge coverage
+<LЕТ=П10=
+<IЕQ=П10=
+<МЕS=EMPTY-OK
+<ЕLS
+<МЕS=EMPTY-BAD
+<ЕND
+<LЕТ=П11=АБВГ
+<IЕQ=П11/2=1'Б'
+<МЕS=INDEX-OK
+<ЕLS
+<МЕS=INDEX-BAD
+<ЕND
+<IЕQ=П11/5=1?
+<МЕS=INDEX-EOF-BAD
+<ЕLS
+<МЕS=INDEX-EOF-OK
+<ЕND
+<LЕТ=П12=АБВГ
+<IЕQ=П12=1'А'1*1'Б'1'Г'
+<МЕS=STAR-BACKTRACK-OK
+<ЕLS
+<МЕS=STAR-BACKTRACK-BAD
+<ЕND
+<LЕТ=П13=АГ
+<IЕQ=П13=1'А'1*1'Г'
+<МЕS=STAR-EMPTY-OK
+<ЕLS
+<МЕS=STAR-EMPTY-BAD
+<ЕND
+<LЕТ=П14=АХ
+<IЕQ=П14=1'А'1'Б'|1'А'1'Х'
+<МЕS=ALT2-OK
+<ЕLS
+<МЕS=ALT2-BAD
+<ЕND
+<LЕТ=П15=АХ
+<IЕQ=П15=1'А'1'Б'|1'А'1'В'
+<МЕS=ALTFAIL-BAD
+<ЕLS
+<МЕS=ALTFAIL-OK
+<ЕND
+<LЕТ=П16=Б
+<IЕQ=П16=^1'Б'
+<МЕS=NOTFALSE-BAD
+<ЕLS
+<МЕS=NOTFALSE-OK
+<ЕND
+<LЕТ=П17=Г
+<IЕQ=П17=1[АБВ]
+<МЕS=SETFAIL-BAD
+<ЕLS
+<МЕS=SETFAIL-OK
+<ЕND
+<LЕТ=П18=А1Б2
+<IЕQ=П18=41(1'А'1Ц)42(1'Б'1Ц)
+<МЕS=CAP2 %П41 %П42
+<ЕLS
+<МЕS=CAP2-BAD
+<ЕND
+<LЕТ=П19=АБВГД
+<IЕQ=П19=1'А'43(1*1'Г')1'Д'
+<МЕS=CAPSTAR %П43
+<ЕLS
+<МЕS=CAPSTAR-BAD
+<ЕND
+<LЕТ=П20=АБ
+<IЕQ=П20=1'А=Я'1'Б'
+<МЕS=REPL-OK %П20
+<ЕLS
+<МЕS=REPL-BAD %П20
+<ЕND
+<LЕТ=П21=АБ
+<IЕQ=П21=1'А=Я'1'В'
+<МЕS=REPLFAIL-BAD %П21
+<ЕLS
+<МЕS=REPLFAIL-OK %П21
+<ЕND
+<LЕТ=П22=12377
+<IЕQ=П22=3Ц2В
+<МЕS=NUMMIX-OK
+<ЕLS
+<МЕS=NUMMIX-BAD
+<ЕND
+<LЕТ=П23=12А
+<IЕQ=П23=3Ц
+<МЕS=DECFAIL-BAD
+<ЕLS
+<МЕS=DECFAIL-OK
+<ЕND
+<МЕХ
+
+к
+к
+птн2
+вый

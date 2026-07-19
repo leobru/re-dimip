@@ -1,0 +1,92 @@
+#!/usr/bin/expect -f
+# Drive DIMIP2 under `dispak --subtasks` through a full subtask cycle:
+#   create/select a catalog -> enter a program in the temporary area -> form a
+#   subtask from it -> wait for completion -> read and list its output buffer.
+#
+# Usage:   expect subtask2.exp [image.b6]    (image defaults to dimip2248.b6)
+# Needs:   a dispak with --subtasks support.
+
+set image [expr {$argc >= 1 ? [lindex $argv 0] : "dimip2248.b6"}]
+set form_cmd [expr {$argc >= 2 ? [lindex $argv 1] : "ф"}]
+set pp_cmd [expr {$argc >= 3 ? [lindex $argv 2] : "пп 41 пс"}]
+set trace_args [expr {$argc >= 4 && [lindex $argv 3] eq "trace" ? "-t -t " : ""}]
+set pre_form_cmd [expr {$argc >= 5 ? [lindex $argv 4] : ""}]
+set timeout 5
+log_user 1
+
+spawn {*}[concat dispak -p -x --subtasks {*}$trace_args --coverage=subtask2.cov $image]
+
+# Startup, DIMIP2 catalog setup, then the program text.
+expect -re {.}
+sleep 0.1
+send "\$кт 1234 0 100\r";
+send "пол пз пз адм\r";
+send "кт 1234 0 пз пз\r";
+send "ред\r";
+send "<МСR=ФЗПЗ\r";
+send "<МЕS=ФЗ %П01\r";
+send "<МЕN\r";
+send "<МСR=КЗПЗ\r";
+send "<МЕS=КЗ %П01 %П02\r";
+send "<МЕN\r\r";
+send "\$к\r";
+send "сф\r";
+send "сф пуск 3 у\r";
+send "ред пуск\r";
+send "<LЕТ=П00/5=%260\r";
+send "<<Ф\r";
+send "<МЕS=ПОСЛЕФ %П01\r";
+send "<GЕТ=П10=ЖДИ-=\r";
+send "\r";
+send "к\r";
+send "ред\r";
+send "ШИФР 419900ЗС5^\r";
+send "ГЛА 419999^\r";
+send "АЦПУ 128^\r";
+send "ЕЕВ1А3\r";
+send "*NАМЕ SUBTASK\r";
+send "      program main\r";
+send "      do 10 i = 1,3\r";
+send "      print 1,i\r";
+send "  10  continue\r";
+send "   1  format(1x'quite a long prefix',i10,' quite a long suffix')\r";
+send "      call exit\r";
+send "      end\r";
+send "*EXECUTE\r";
+send "*ЕND FILЕ\r\r";
+if {$pre_form_cmd ne ""} {
+    send "$pre_form_cmd\r"
+    sleep 0.2
+}
+send "$form_cmd\r"
+sleep 1
+if {$pp_cmd ne ""} {
+    send "$pp_cmd\r"
+}
+
+# Press Enter ~every second until the subtask signals end-of-task, grabbing
+# its channel number from "КЗ NNN КОНЕЦ ЗАДАЧИ" (leading zeros stripped).
+set chan ""
+set n 0
+set timeout 1
+while {$n < 40} {
+    expect {
+        -re {КЗ +0*([0-9]+)} { set chan $expect_out(1,string); break }
+        -re {КОНЕЦ ЗАДАЧИ}    { set chan 41; break }
+        eof                  { break }
+        timeout              { send "\r"; incr n }
+    }
+}
+if {$chan eq ""} {
+    send_user "\n>>> subtask never reported КЗ; aborting\n"
+    catch { send "вый\r"; expect eof }
+    exit 1
+}
+send_user "\n>>> subtask ended on channel $chan after $n enters; reading its buffer\n"
+sleep 0.5
+
+send "б $chan 1 80\r"; sleep 1
+send "л\r";        sleep 1
+send "вый\r"
+set timeout 5
+expect eof
