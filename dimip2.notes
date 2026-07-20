@@ -17,6 +17,7 @@
 02020 > Copy monitor/catalog setup words into the working area.
 02023r ; Э71 using D02047; same early terminal/event path shape as dimip.bin
 02031 > Main startup proceeds into the command loop after printing/formatting setup text.
+02041r ; М13 нормализуется относительно G05670; нуль ведёт в общий хвост чтения/редактирования.
 02067 > Common message printer: called by many inline text/data blocks above 02032.
 02073 > Text block walker/formatter entry used by startup and diagnostics.
 
@@ -69,12 +70,22 @@
 02525 > КОМПСТ: central pass/continue path. Used by blank-comment key and by ВRI.
 02525 > Many command handlers return here after setting KOT / updating parser state.
 02534 > Common next-line / continue path after MKP command handling.
+02562 ; М12!=0 выбирает путь вызова файла/макроса по имени; имя уже лежит в рабочей строке.
+02630 > G02630 — вход поиска файла/макроса по разобранному имени: копирует КОМАНД
+02630 > в АРГ1, подготавливает описатели и дальше ищет запись/тело файла.
+02641 ; М1 после выделения из служебного байта превращается в смещение/код возврата для вызывающего пути.
+02674r ; М4 получает смещение M13-03513 для развилки после поиска записи файла.
+02752r ; М2 переводится из сдвинутого каталожного/зонного поля к индексу записи формата I.
 02625 > Shared variable/string writeback tail used by LET, GET, READ, SIZE and others.
 
 # ---- parsing and variable helpers ----
 03026 > Parse numeric/index argument component.
 03051 > Fetch next MKP argument byte/string component; returns through caller register.
+03060 > G03060/G03062 — запись байта в рабочую строку: '73750' является базой
+03060 > буфера строки, а М5 задаёт байтовую позицию внутри неё.
 03263 > GET/default prompt support: format prompt text before terminal input.
+03137r ; М4 приводится к смещению относительно пути G03143 перед возвратом в разбор директивы.
+03147r ; М3 проверяется как код первого символа/префикса; нуль идёт в обычный разбор строки.
 03417 > Шлюз асинхронных МКП-событий: перед переходом к обработчику проверяет
 03417 > бит события в МП00/VAR00. `Ф`, `$Ф`, `Ф/*`, `Ф/ПЗ` сами эту маску не
 03417 > включают: событие ПЗ доходит до разборщика, но уходит обратно в цикл.
@@ -84,10 +95,12 @@
 03446 > дальнейший путь падает на `Э71 ОПКАН` с нулевой/недопустимой операцией.
 03467 > Обработчик остановленной/окончившейся ПЗ: Э62 101 -> Э62 54 -> оформление
 03467 > причины. subtask2.exp пока не получает сюда автоматический КЗПЗ-переход.
+03476r ; М4 нормализует код причины ПЗ перед развилкой на текст Э50 202 / пропуск.
 03722 > Store numeric result as decimal text into the target MKP variable.
 04017 > Resolve MKP variable operand from parsed argument.
 04027 > Iterate over bytes of an MKP variable/text value.
 04036 > Fetch byte by position from text/variable storage.
+04102 ; '73750' здесь — та же база рабочей строки для сборки/вывода текста.
 
 # ---- arithmetic / assignment ----
 03710 > КОМАDD: add integer text to target variable.
@@ -170,3 +183,6 @@
 05464 > Завершение структурного WRI: переход к общей записи тела/сбросу зоны канала.
 05623 > Новый путь bd2.txt при последующем `ред бд`/`л`: печать байтов сформированного
 05623 > рекорда с ненулевым полевым справочником; в листинге виден префикс "◇0000".
+05734 > G05734 — хвост вставки строки: G03060 подготавливает байтовое смещение
+05734 > в рабочем буфере '73750', затем заголовок строки пересобирается перед возвратом.
+05735r ; М16 переводится из смещения байта к адресу/позиции, которую использует вставка строки.

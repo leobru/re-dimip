@@ -49,6 +49,9 @@ dimip2.uncov: dimip2.lst combined2.cov
 re-dimip.bin: re-dimip.be
 	./asm.pl $<
 
+re-dimip2.bin: re-dimip2.be
+	./asm.pl $<
+
 dimip.dump:
 	besmtool dump 2048 --start=044 --length=2 > $@
 
@@ -56,8 +59,18 @@ re-dimip.dump:
 	./asm.pl re-dimip.be
 	besmtool dump 1234 --start=044 --length=2 > $@
 
+re-dimip2.dump:
+	./asm.pl re-dimip2.be
+	besmtool dump 1234 --start=044 --length=2 > $@
+
 check: dimip.bin re-dimip.bin
 	cmp $^ && echo SUCCESS
+
+check2: dimip2.bin re-dimip2.bin
+	cmp $^ && echo SUCCESS
+
+diff2: dimip2.bin re-dimip2.bin
+	./compare_bins.py $^
 
 unique: $(COVERAGE_TARGETS)
 	./unique_coverage.py $^

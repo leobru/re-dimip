@@ -78,6 +78,6 @@ system("dispak $base.prn > $base.lst; rm $base.prn");
 $res = `grep ОШИБОК= $base.lst`;
 if ($res =~ /=0000/) { $color = 2; } else { $color = 1; }
 print STDERR "\033[1;3${color}m$mod	: $res\033[22;39m\n";
-system("rm -f re-dimip.bin re-dimip.dump");
-system("besmtool dump 1234 --start=044 --length=2 > re-dimip.dump") if $color == 2;
-system("besmtool dump 1234 --start=044 --length=2 --to-file=re-dimip.bin") if $color == 2;
+system("rm -f $base.bin $base.dump");
+system("besmtool dump 1234 --start=044 --length=2 > $base.dump") if $color == 2;
+system("besmtool dump 1234 --start=044 --length=2 --to-file=$base.bin") if $color == 2;
