@@ -169,7 +169,7 @@ that drives the parser — the prime target for the next pass.
 - **Temp area / output buffer** — the editing scratch zones (временная область) and the
   subordinate-task output buffer (буфер вывода) named in the manual; their disk addresses
   appear among the `D057xx` constants and the Э70 info words.
-- **Field pack/unpack helpers** — routines `G03041/G03050/G03052`, `G04102/G04112/G04121`
+- **Field pack/unpack helpers** — routines `G03041/G03050/G03052`, `G04102/БАЙТМП/G04121`
   use multiply-by-constant + `счмр` (`D02415/D02417/D02420/D02421`) to extract/insert
   bit-fields of catalog/zone-address words.
 
@@ -358,7 +358,7 @@ corresponding page-layout work:
 - `05003`–`05004` is the `$ПЕЧ` next-page control path reached from `G05000`. It recognizes
   the `..` control sequence checked against `ТЧКТЧК`, sets `М13=1`, and tests the remainder
   in `РАБ` with `ржа '13'`. A `..NN` line continues through `05005`–`05006`, shifts the
-  numeric remainder, sets the return state for `G04747`, and parses the count with `G03011`.
+  numeric remainder, sets the return state for `G04747`, and parses the count with `ЧИСЛО`.
 
 ## 8c. The catalog / archive on-disk format & the `СФ` directive
 
@@ -818,7 +818,7 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
 - **Macro variables**: `МПn` = 4 words at cells `4n+1..4n+4` (`VАР00`=1–4, `МП10`=51₈–54₈,
   verified); `АДРМП 04102` resolves n→М4. Text УПП, `0377` terminator. КОТ = byte of
   `VАР00` word 1 (`УСТКОТ G04333`).
-- **`%`-substitution** happens while *reading* the line (`G03717`): `%` + octal digit ⇒
+- **`%`-substitution** happens while *reading* the line (`ПОДСТ`): `%` + octal digit ⇒
   `%ККК` = 3-octal-digit char code (a non-digit there → **`НЕВРН КОНСТ`**, `G02055` — hit
   by typing `%10`); `%` + letter ⇒ МП name, its content is spliced into the line (`%П10`→`128`).
 - **Conditionals**: cell `'1560'` is a **shift-register stack of nesting bits** (bit0: 0 =
@@ -828,7 +828,7 @@ Confirmed mechanics (addresses in `dimip.lst` / `dimip.notes`):
   (verified: the `<МЕS=НЕТ` between `ЕLS`/`ЕND` never reached `ДСПКОМ`).
 - **Channels** (`ОРЕ/RЕА/WRI/FОR/FIN/СЛО`, НК=1..3): per-channel block at `'1557'+20₈·N`
   (`1577/1617/1637`): Э70 descriptor, line counter, file cipher key. Encrypted files are
-  de/re-ciphered per zone on channel I/O (`G04552`/`КОМСЛО` use `рзб`/`сбр` with `ИНКЛЮЧ`,
+  de/re-ciphered per zone on channel I/O (`ЧТКАН`/`КОМСЛО` use `рзб`/`сбр` with `ИНКЛЮЧ`,
   same permutation cipher as `ШИФР` §8h). КОТ 3 «канал не открыт»; КОТ 4 on wrong mode is
   the `ДСПКОМ` default М16 (see the `СНЕ` subsection below), not a dedicated code.
 - **Arithmetic** (`АDD/SUВ/МUL/DIV`, adjacent handlers `03777`–`04003`): integers as decimal
@@ -915,8 +915,9 @@ render every small literal operand — `слиа 1(М5)`, `уиа 4(М16)`, … 
 | `1561` | `РКЛЮЧ` | working cipher key (§8h). |
 | `1562`–`1565` | — | (`РКЛЮЧ+1..+4`) `RЕР` loop frames grow *down* from `1562` in 4-word steps. |
 | `1707` | `ПРЕФ` | `$`-prefix flag (`ФЛАГД`); `ПРЕФ-1` caches the МП char `%` during МКП line processing. |
+| `1712` | `ТЕКТОМ` | cached `Э50 131` current-volume attach word for `ПОДКАТ`; unchanged value skips reattaching the same volume, changed value is stored here before `Э50 131`. |
 | `1715` | `ОПВЫВ` | Э71 descriptor: terminal line output (`*71 1715` throughout the traces). Head `+0..+2` = the Э71 descriptor words; `+3`/`+4` are repurposed as subtask state (below); the tail `+5..+16` is a block of loosely-related monitor state cells, each named individually below. |
-| `1720` | `НКАН` | subtask channel number `<NК>` — `ДИСПАТ` packs `АРГ1`'s value into the top byte (`сбр D02442; сда 64+36`), i.e. the `Э62` channel-argument field; read by every ПЗ op (`Б`/`ЗП`/`ПП`/`ВЫБ`, `ПЗНОВ`/`ПЗСТОП`, `G05127`→`Э50 151`). Was `ОПВЫВ+3`. |
+| `1720` | `НКАН` | subtask channel number `<NК>` — `ДИСПАТ` packs `АРГ1`'s value into the top byte (`сбр D02442; сда 64+36`), i.e. the `Э62` channel-argument field; read by every ПЗ op (`Б`/`ЗП`/`ПП`/`ВЫБ`, `ПЗНОВ`/`ПЗСТОП`, `ПЗКАТ`→`Э50 151`). Was `ОПВЫВ+3`. |
 | `1721` | `ТЕКПЗ` | channel of the currently-active (terminal-owning) subtask, `0` = none. `ПЗНОВ` claims it, `ПЗСТОП`/`G03603` release it (`нтж НКАН`), `ДИРЗП` uses it for `Э62 46` terminal handover; `ДИРФ`'s `Ф/*` also writes it. Was `ОПВЫВ+4`. |
 | `1722` | `ОПВЫВ5` | (`ОПВЫВ+5`) placeholder — thin evidence: only site is `мод ОПВЫВ5` in `ДИРС` (an index/address operand). Kept named so the tail doesn't re-anchor. |
 | `1723` | `ТЕРСОБ` | (`ОПВЫВ+6`) terminal-exchange event bits — `ДЕШСОБ` latches them into the gathered event word (`или ТЕРСОБ` at `03474`; bit r.11 is staged here at `03476` before `ПЗНОВ`). Was `ОПВЫВ+6`. |
@@ -928,7 +929,7 @@ render every small literal operand — `слиа 1(М5)`, `уиа 4(М16)`, … 
 | `1731` | `ОПВВ12` | (`ОПВЫВ+12`) placeholder — tentative: a field of the `Э50 114` (date + machine-number) result (`и D05756`), feeds `ДАТА` and is OR'd into headers (`G05656/G05715`). Not firmed up (date component vs. machine number). |
 | `1732` | `ОПВВ13` | (`ОПВЫВ+13`) placeholder — thin evidence: set once at init to `'F'` (`ENDMRK = 0100`) and apparently never read. |
 | `1733` | `ЗАПБУФ` | (`ОПВЫВ+14`) `Э62 41` buffer-read request base word (`катномер:32-25 \| тип/лист \| D02356`); `ДИРБ` bumps the zone number (`слц ОДИН`) until `Э62 41` returns «нет зоны». Was `ОПВЫВ+14`. |
-| `1734` | `СЧСТР` | (`ОПВЫВ+15`) output line/string counter — `G04701`: `сч СЧСТР / слц ОДИН / зп СЧСТР` (increment), reset by `ДИРПЕЧ`/catalog ops, feeds number formatting (`G03032`). |
+| `1734` | `СЧСТР` | (`ОПВЫВ+15`) output line/string counter — `G04701`: `сч СЧСТР / слц ОДИН / зп СЧСТР` (increment), reset by `ДИРПЕЧ`/catalog ops, feeds number formatting (`ДЕСУПП`). |
 | `1735` | `ТОМКАТ` | (`ОПВЫВ+16`) `Э50 131` catalog-volume attach word (LUN + BCD том) — `ПОДКАТ`: `сч ТОМКАТ / Э50 131`; set by `ДИРКТ` from `<ТОМ>`. |
 | `1736` | `ОПФАЙЛ` | Э70 descriptor: library-file zone exchange (`ШИФР` increments the zone in it; `ДИРФ` builds the Э50 7701 control word from it). |
 | `1741` | `ОПКАТ` | Э70 descriptor: catalog zone 0 exchange. |
@@ -1070,7 +1071,7 @@ bit 11, DIMIP re-runs `ПЗНОВ` (start) on a subtask that has already ended i
 directive (`ДИРБ` 05051) builds the `Э62 41` argument (fetch a subtask's print stream, 05066)
 from `ЗАПБУФ` (`ОПВЫВ+14`), whose high half must carry the subtask's **input-catalog (queue) number**.
 Data path: `Ф`→`Э50 7701` returns the queue number in `reg[016]`; to read the buffer, `ДИРБ`
-calls `G05127` (05127) = `сч НКАН` (channel) → **`Э50 151`** (§5.3.40, channel→queue number)
+calls `ПЗКАТ` (05127) = `сч НКАН` (channel) → **`Э50 151`** (§5.3.40, channel→queue number)
 → `и D02362` (`м40в'377'`, top byte 48–41) → `сда 64+16` (right-shift 16, lands in `acc.l`).
 dispak's `Э50 151` (`extra.c`:1805) is unimplemented: it returns `E_UNIMP` for any nonzero
 channel and a hardcoded `acc.r = 0123` (`/* arbitrary */`) for channel 0 — placed in the **low**
@@ -1146,7 +1147,7 @@ round-trips a file through the channel API — `<ОРЕ=звых=2=W`, two `<WRI
 | `ОПКАН`+16к (`'1557'`) | Э70 control word: buffer page in the left half, LUN+zone in the right; **CW bit 40 (`Э70` read bit) doubles as the channel direction flag** |
 | `ШКУСЛ`+16к (`'1560'`) | current record pointer (absolute address inside the buffer page); 0 = channel closed |
 | `РКЛЮЧ`+16к (`'1561'`) | open counter/limit (decremented by `СLО`) |
-| `РКЛЮЧ+1`+16к | cipher key from the `/КЛЮЧ` suffix (`АРГ3+28`); nonzero → each zone is decrypted on read (`G04552`) / encrypted on flush (`G04511`), the §8h cipher |
+| `РКЛЮЧ+1`+16к | cipher key from the `/КЛЮЧ` suffix (`АРГ3+28`); nonzero → each zone is decrypted on read (`ЧТКАН`) / encrypted on flush (`G04511`), the §8h cipher |
 | `РКЛЮЧ+2`+16к … | up to 13 field names set by `<NАМ=к=имя1=…` (`КОМNАМ` 04327) |
 
 ### `<ОРЕ` (`КОМОРЕ` 04025) — three forms
@@ -1154,7 +1155,7 @@ round-trips a file through the channel API — `<ОРЕ=звых=2=W`, two `<WRI
 - **`<ОРЕ=файл`** (no channel): info only — zone → П01, length → П02, type string
   (`D02143+2`, §8c) → П03 (cells 5/9/13). Live: `БЕЗКАН З=7 Д=3 Т=У`.
 - **`<ОРЕ=файл=к`** (no mode letter): **read**. Builds `ОПКАН` = `к<<30 | file base CW`,
-  stores the key, toggles the catalog dot bit (§8c), then `G04552` (04552) pages the first
+  stores the key, toggles the catalog dot bit (§8c), then `ЧТКАН` (04552) pages the first
   zone into the buffer (`слц ОДИН` on the zone field + `Э70`, then the key decrypt) and sets
   `ШКУСЛ` to the buffer base. `<ОРЕ==к` (no filename) opens the **temp area** itself
   (`ОПВЫВ7` base) as the channel.
@@ -1226,7 +1227,7 @@ Relevant `mkp.txt` fragment:
 - **End of file**: any word with **L = 0 but nonzero content** — `СLО` writes
   `7777777700000000` (three `377` bytes = `EOFCH<<24`), the editor's `К` writes `КОНФ`
   `7777777777777700`; both satisfy the same test (`и МСК6` = 0, word ≠ 0 → `G03527`).
-  An **all-zero word** means "zone exhausted": `G04552` pages in the file's next zone and
+  An **all-zero word** means "zone exhausted": `ЧТКАН` pages in the file's next zone and
   the scan continues. Records do not span zones.
 
 **Dynamic BD proof (`bd.setup` + `bd.txt`).** The coverage test creates a real catalog
@@ -1283,7 +1284,7 @@ the directory bytes; bytes `007,014` render as `7/`.
   no variable is given — static reading, not exercised), stopping at the `МСКМАР` word —
   then advance one record (`G04304`). Landing on the EOF word zeroes `ШКУСЛ` (channel
   closed) and takes the `G03527` EOF reaction: the session's third read left П15 stale
-  (`ЧИТ3 1`) because `G04567` then returns error 3.
+  (`ЧИТ3 1`) because `ПРКАН` then returns error 3.
 - **By record number** (numeric 3rd arg, `RNREA` 04347): find the zone via the per-zone
   first-record index at `'620'/'621'` (built when temp-area zones are flushed, `ZNFLU`;
   the seek re-points the channel with `ОПВЫВ7`-based zones, so this mode is for the
@@ -1303,13 +1304,13 @@ An extra argument in `АРГ3+27` makes `<RЕА` also store the current record's
 `WRI`: copy the variable's storage words verbatim until the `МСКМАР` word, then store the
 header **at the record start = length by subtraction** (`вчоб ШКУСЛ(М13)`); page-boundary
 overflow flushes the zone (`G04511` 04511: encrypt if keyed + `Э70` write) and retries.
-`СLО`: requires a write-mode channel (the `G04567` guard inverted), stores the EOF word
+`СLО`: requires a write-mode channel (the `ПРКАН` guard inverted), stores the EOF word
 `EOFCH<<24` at the current position, flushes the final zone, decrements `РКЛЮЧ`, zeroes
 `ШКУСЛ`.
 
 ### Guards, errors, and type handling
 
-`G04567` (04567) resolves `к` → `М13/М12` and returns `CW & Е40`: `КОМRЕА` errors if the
+`ПРКАН` (04567) resolves `к` → `М13/М12` and returns `CW & Е40`: `КОМRЕА` errors if the
 read bit is **clear** (opened with a mode letter), `КОМWRI`/`КОМСLО` if it is **set**.
 Channel errors do **not** abort the macro: `G04333` (04333) records the code in a VАР00
 field (cell 1) and continues — that is why `<ОРЕ=нетфайл=3` is followed by `ПОСЛЕ-ОШ` in
