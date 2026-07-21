@@ -1,0 +1,29 @@
+$кт 1234 0 10
+пол макро
+кт 1234 0 макро
+ред
+<mcr=boom
+<st=01=1
+<boom
+<men
+
+$к
+сф
+boom
+вый
+
+# Trace notes for dimip2248.b6 with installed dispak:
+#   timeout 10 dispak -t -t -p --coverage=boom2.cov dimip2248.b6 \
+#       < boom2.txt > boom2.out 2> boom2.trace
+# A 1-second timeout can interrupt the long MKP scan, but with timeout 10 the
+# run finishes normally, writes boom2.cov, prints "СТЕК!" and then
+# "КОНЕЦ ЗАДАЧИ".
+# Startup executes 02025: *67 2364 with word 0000313310076003:
+#   transfer=03133, mode=2 (M35 read watch), watch address=76003.
+# This is not the dimip.b6 stack-limit watch. On overflow the debug transfer
+# enters the 03133/03173 print-stream initialization path.
+# The long scan at 02655-02660 walks two-word entries from the 76204 area,
+# compares the first word with АРГ1, and keeps advancing while the entry does
+# not match. After the recursive macro overflows MKP state, command lookup
+# eventually recognizes the СТЕК diagnostic directive. The final path is
+# 03205..03213 -> 03435..03437 -> 03411:*62.

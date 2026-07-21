@@ -1,0 +1,24 @@
+$кт 1234 0 10
+пол макро
+вой макро
+ред
+<mcr=boom
+<st=01=1
+<boom
+<men
+
+$k
+сф
+boom
+boom
+вый
+
+# Trace notes for dimip.b6 with installed dispak:
+#   timeout 10 dispak -t -t -p --coverage=boom.cov dimip.b6 \
+#       < boom.txt > boom.out 2> boom.trace
+# The recursive macro exhausts the MKP stack twice. The installed Э67 word at
+# 02040 is 0000314110001553: transfer=03141, mode=1, watched address=01553.
+# The trace reaches the diagnostic table walker at 03540..03551; it selects
+# D02042/D02043, prints "ПЕРЕП. СТЕК", and returns through 02040 to ГЛЦИКЛ.
+# After the second failed BOOM command the session exits normally via
+# 03523..03525 -> 03507:*62.
